@@ -95,7 +95,27 @@ moves from research/prototyping into systems integration and benchmarking:
   author reviews each pull request before merge.
   \item \textbf{Liaison} --- Justin Kwinecki is the team liaison for the
   course (point of contact with the instructor/TA).
+  \item \textbf{Quality assurance} --- rotating; the QA member for a given
+  deliverable checks it against the relevant checklist (e.g.
+  \texttt{docs/Checklists/}) and the course rubric before submission.
 \end{itemize}
+
+We also anticipate the following technical role areas, which will overlap
+rather than be strictly siloed to one person each:
+
+\begin{itemize}
+  \item \textbf{Tree-attention kernel \& masking} --- implementing and
+  validating the fused prompt-tree prefill mechanism in PyTorch.
+  \item \textbf{Serving-engine / scheduler integration} --- the vLLM
+  \texttt{BlockManager}/scheduler fork and ``KV-Promise'' work.
+  \item \textbf{Dispatcher / API} --- the interface agent frameworks use to
+  submit prompt-tree requests.
+  \item \textbf{Benchmarking \& profiling} --- correctness tests, TTFT/VRAM/FLOPs
+  measurement, and comparison against baseline vLLM.
+\end{itemize}
+
+\todo{CONFIRM WITH TEAM: assign specific members to the technical role
+areas above, or state they will be assigned once the PoC phase begins.}
 
 \section{Workflow Plan}
 
@@ -126,15 +146,17 @@ moves from research/prototyping into systems integration and benchmarking:
   Hazard Analysis, V\&V Plan, Design Documents, Rev 0 demo, Final demo, and
   V\&V Report), interleaved with our own technical milestones:
   \begin{itemize}
-    \item \textbf{Months 1--3}: Prove the fused prompt-tree prefill
-    mechanism in pure PyTorch (no serving engine) --- a shared trunk plus
-    multiple branch prompts evaluated in a single forward pass with a
-    custom tree-attention mask, producing identical logits to running each
-    branch separately.
-    \item \textbf{Months 4--5}: Prototype the ``KV-Promise'' scheduler
+    \item \textbf{Sept--Nov (by the PoC demo)}: Prove the fused
+    prompt-tree prefill mechanism in pure PyTorch (no serving engine) --- a
+    shared trunk plus multiple branch prompts evaluated in a single forward
+    pass with a custom tree-attention mask, producing identical logits to
+    running each branch separately. This is the scope of our PoC
+    demonstration (see below); we are not attempting serving-engine
+    integration or performance benchmarking by this point.
+    \item \textbf{Dec--Jan}: Prototype the ``KV-Promise'' scheduler
     extension (binding staggered concurrent requests to an in-progress
     prefill) on top of a real serving engine (vLLM).
-    \item \textbf{Months 6--8}: End-to-end integration with a multi-agent
+    \item \textbf{Feb--Apr}: End-to-end integration with a multi-agent
     framework and benchmarking (Time-To-First-Token, VRAM, FLOPs) against
     baseline vLLM across fan-out factors.
   \end{itemize}
@@ -158,6 +180,16 @@ running each branch as its own independent forward pass --- proving the
 core mechanism is correct before we invest in performance engineering or
 vLLM integration.
 
+If the PoC demo reveals that the fused tree-attention mask cannot be made
+to work correctly or efficiently enough (e.g. numerical mismatches we
+cannot resolve, or masking overhead that eliminates the benefit), our
+fallback is to narrow scope to an \emph{observability} tool: instrumenting
+an existing serving engine to detect and report redundant/recomputed
+prefill work across concurrent multi-agent requests, without necessarily
+eliminating it. This keeps the project in the same problem space
+(multi-agent prefill inefficiency) while requiring a smaller and more
+tractable technical contribution.
+
 \section{Expected Technology}
 
 \begin{itemize}
@@ -165,6 +197,12 @@ vLLM integration.
 needed later.
 \item \textbf{Libraries/frameworks}: PyTorch, Hugging Face Transformers,
 FlashAttention, and (later) a fork of vLLM's scheduler/\texttt{BlockManager}.
+We chose vLLM over alternatives like SGLang or TGI because it has the
+largest community/documentation base (easier to onboard on, given the team
+has no prior GPU-serving-systems experience) and its \texttt{BlockManager}
+is a well-documented entry point for the Copy-on-Write paging behaviour we
+need to extend. The tradeoff is that vLLM's codebase is large, so ramp-up
+time is a real risk we are budgeting for.
 \item \textbf{Pre-trained models}: we will use existing open-weight LLMs
 (e.g. Llama/Qwen family) rather than training our own model --- this
 project is about serving-system performance, not model quality.
@@ -314,12 +352,15 @@ discussion and, if unresolved, a team vote (see Decision Making below).
 
 \subsubsection*{Stay on Track}
 
-\todo{CONFIRM WITH TEAM: target metrics and consequences.}
+\todo{CONFIRM WITH TEAM: adjust the specific thresholds below to what the
+team actually agrees on.}
 
 We will use the course's project management metrics (commits, issue
-activity) as a lightweight check-in signal. If a member consistently
-under-contributes, the team will raise it directly with them first, and
-escalate to the TA/instructor only if it persists.
+activity) as a lightweight check-in signal, with a quantified trigger: if
+a member has no commits/issue activity and misses two consecutive weekly
+meetings without an acceptable excuse (see Attendance above), the team
+will raise it with them directly in the next meeting. If it persists for a
+further two weeks, the team will escalate to the TA.
 
 \subsubsection*{Team Building}
 
