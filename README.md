@@ -1,10 +1,10 @@
 # Tandem
 
 Developer Names:
-Justin Kwinecki
-Zayed Umer
-William Pol
-Manav Patel
+Justin Kwinecki,
+Zayed Umer,
+William Pol,
+Manav Patel and
 Musab Mondal
 
 Date of project start:
