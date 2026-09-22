@@ -22,182 +22,217 @@
 \toprule
 \textbf{Date} & \textbf{Developer(s)} & \textbf{Change}\\
 \midrule
-Date1 & Name(s) & Description of changes\\
-Date2 & Name(s) & Description of changes\\
-... & ... & ...\\
+Sept 22, 2026 & Team 11 & Initial draft for TA meeting\\
 \bottomrule
 \end{tabularx}
 \end{table}
 
 \newpage{}
 
-\wss{Put your introductory blurb here.  Often the blurb is a brief roadmap of
-what is contained in the report.}
-
-\wss{Additional information on the development plan can be found in the
-\href{https://gitlab.cas.mcmaster.ca/courses/capstone/-/blob/main/Lectures/L02b_POCAndDevPlan/POCAndDevPlan.pdf?ref_type=heads}
-{lecture slides}.}
+This document lays out how Team 11 plans to work together over the course of
+the Tandem capstone project: our meeting and communication plans, team
+roles, git/GitHub workflow, project scheduling, our Proof of Concept
+demonstration plan, expected technology stack, and our team charter.
 
 \section{Confidential Information?}
 
-\wss{State whether your project has confidential information from industry, or
-not.  If there is confidential information, point to the agreement you have in
-place.}
+This project does not involve any confidential information from industry.
+The team does not currently have a direct industry supervisor, so there is no
+NDA or confidentiality agreement in place.
 
-\wss{For most teams this section will just state that there is no confidential
-information to protect.}
 \section{IP to Protect}
 
-\wss{State whether there is IP to protect.  If there is, point to the agreement.
-All students who are working on a project that requires an IP agreement are also
-required to sign the ``Intellectual Property Guide Acknowledgement.''}
+There is no IP to protect at this stage. This is an open-source systems
+research project (extending existing open-source LLM inference engines such
+as vLLM/SGLang) with no industry sponsor, so no IP agreement or
+Intellectual Property Guide Acknowledgement is required.
 
 \section{Copyright License}
 
-\wss{What copyright license is your team adopting.  Point to the license in your
-repo.}
+The team is adopting the MIT License, included as \texttt{LICENSE} in the
+root of the
+\href{https://github.com/jjustin-k/Tandem}{project repository}.
 
 \section{Team Meeting Plan}
 
-\wss{This section is for meetings between the team members, and meetings between 
-the team and their supervisor/advisor (as appropriate).}
+\todo{CONFIRM WITH TEAM: exact day/time and virtual vs. in-person.}
 
-\wss{How often will the team meet? where? when?}
+The team will meet weekly (proposed: once during a shared lecture/tutorial
+slot when nothing else is scheduled, day/time TBD) to review progress, and
+more often as needed leading up to deliverable deadlines. Meetings will
+primarily be in person on campus, with virtual meetings (Discord/Zoom, TBD)
+used when schedules conflict.
 
-\wss{If the meeting is a physical location (not virtual), out of an abundance of
-caution for safety reasons you shouldn't put the location online}
+Each meeting will have a rotating chair responsible for setting the agenda
+ahead of time and keeping the meeting on track, and a notetaker who records
+decisions and action items as a GitHub Issue or in the meeting minutes.
 
-\wss{To help schedule meetings, you can use the lecture/tutorial time when we do 
-not have anything else scheduled.}
-
-\wss{How often will you meet with your supervisor/advisor?  when?  where?}
-
-\wss{Will meetings be virtual?  At least some meetings should likely be
-in-person.}
-
-\wss{How will the meetings be structured?  There should be a chair for all meetings.  
-There should be an agenda for all meetings.}
+We do not yet have a supervisor/advisor confirmed (actively in discussion
+with a few candidates, per our project review feedback). Once one is
+secured, we plan to meet with them roughly biweekly, virtually by default,
+with cadence adjusted to their availability.
 
 \section{Team Communication Plan}
 
-\wss{Issues on GitHub should be part of your communication plan.}
+\todo{CONFIRM WITH TEAM: which chat tool (Discord/Slack/Teams).}
+
+Day-to-day communication will happen over a team chat tool (Discord,
+tentative). GitHub Issues will be used for anything tied to concrete work:
+bug reports, feature/research tasks, and decisions that affect the code or
+documentation, so that discussion stays attached to the artifact it affects
+and is searchable later.
 
 \section{Team Member Roles}
 
-\wss{You should identify the types of roles you anticipate, like notetaker,
-leader, meeting chair, reviewer.  Assigning specific people to those roles is
-not necessary at this stage.  In a student team the role of the individuals will
-likely change throughout the year.}
+At this stage we anticipate the following rotating roles rather than fixed
+assignments, since responsibilities will naturally shift as the project
+moves from research/prototyping into systems integration and benchmarking:
+
+\begin{itemize}
+  \item \textbf{Meeting chair} --- sets the agenda, runs the meeting.
+  \item \textbf{Notetaker} --- records decisions/action items.
+  \item \textbf{PR reviewer(s)} --- at least one teammate other than the
+  author reviews each pull request before merge.
+  \item \textbf{Liaison} --- Justin Kwinecki is the team liaison for the
+  course (point of contact with the instructor/TA).
+\end{itemize}
 
 \section{Workflow Plan}
 
 \begin{itemize}
-	\item How will you be using git, including branches, pull request, etc.?
-	\item How will you be managing issues, including template issues, issue
-	classification, etc.?
-  \item Use of CI/CD
+	\item Git/GitHub: work happens on feature branches off \texttt{main}
+	(named \texttt{<initials>/<short-description>}); changes land via pull
+	request with at least one team member's approval before merging. No
+	direct pushes to \texttt{main} for code changes.
+	\item Issues: GitHub Issues are used for tracking bugs, features, and
+	research tasks, labelled by type (\texttt{bug}, \texttt{feature},
+	\texttt{research}, \texttt{docs}) and by deliverable/milestone.
+	\item CI/CD: GitHub Actions runs on every pull request to build the
+	LaTeX documentation (already set up, see
+	\texttt{.github/workflows/latex-pages.yml}) and, once source code
+	exists, will run linting and the test suite.
 \end{itemize}
 
 \section{Project Decomposition and Scheduling}
 
-\begin{itemize}
-  \item How will you be using GitHub projects?
-  \item Include a link to your GitHub project
-\end{itemize}
+\todo{CONFIRM WITH TEAM / ADD LINK: GitHub Projects board URL.}
 
-\wss{How will the project be scheduled?  This is the big picture schedule, not
-details. You will need to reproduce information that is in the course outline
-for deadlines.}
+\begin{itemize}
+  \item We will use a GitHub Projects board (link TBD) with columns for
+  Backlog, In Progress, In Review, and Done, with issues tied to each
+  deliverable milestone below.
+  \item Big-picture schedule follows the course deliverable calendar
+  (Problem Statement \& Dev Plan, Proof of Concept demo, Requirements/SRS,
+  Hazard Analysis, V\&V Plan, Design Documents, Rev 0 demo, Final demo, and
+  V\&V Report), interleaved with our own technical milestones:
+  \begin{itemize}
+    \item \textbf{Months 1--3}: Prove the fused prompt-tree prefill
+    mechanism in pure PyTorch (no serving engine) --- a shared trunk plus
+    multiple branch prompts evaluated in a single forward pass with a
+    custom tree-attention mask, producing identical logits to running each
+    branch separately.
+    \item \textbf{Months 4--5}: Prototype the ``KV-Promise'' scheduler
+    extension (binding staggered concurrent requests to an in-progress
+    prefill) on top of a real serving engine (vLLM).
+    \item \textbf{Months 6--8}: End-to-end integration with a multi-agent
+    framework and benchmarking (Time-To-First-Token, VRAM, FLOPs) against
+    baseline vLLM across fan-out factors.
+  \end{itemize}
+\end{itemize}
 
 \section{Proof of Concept Demonstration Plan}
 
-What is the main risk, or risks, for the success of your project?  What will you
-demonstrate during your proof of concept demonstration to convince yourself that
-you will be able to overcome this risk?
+The main risk to this project is technical: whether a single fused
+attention pass can correctly and efficiently evaluate a shared-prefix
+``prompt tree'' (one trunk plus several divergent branches) instead of
+recomputing the shared prefix once per branch, and whether that mechanism
+still holds up once integrated into a real serving engine under concurrent
+load.
+
+For the Proof of Concept demonstration, we will show a pure PyTorch
+implementation that takes a shared trunk plus several branch prompts,
+packs them into one sequence, builds a custom 2D block-structured
+tree-attention mask, and runs a single forward pass. We will demonstrate
+that the resulting logits for each branch are numerically identical to
+running each branch as its own independent forward pass --- proving the
+core mechanism is correct before we invest in performance engineering or
+vLLM integration.
 
 \section{Expected Technology}
 
-\wss{What programming language or languages do you expect to use?  What external
-libraries?  What frameworks?  What technologies.  Are there major components of
-the implementation that you expect you will implement, despite the existence of
-libraries that provide the required functionality.  For projects with machine
-learning, will you use pre-trained models, or be training your own model?  }
-
-\wss{The implementation decisions can, and likely will, change over the course
-of the project.  The initial documentation should be written in an abstract way;
-it should be agnostic of the implementation choices, unless the implementation
-choices are project constraints.  However, recording our initial thoughts on
-implementation helps understand the challenge level and feasibility of a
-project.  It may also help with early identification of areas where project
-members will need to augment their training.}
-
-Topics to discuss include the following:
-
 \begin{itemize}
-\item Specific programming language
-\item Specific libraries
-\item Pre-trained models
-\item Specific linter tool (if appropriate)
-\item Specific unit testing framework
-\item Investigation of code coverage measuring tools
-\item Specific plans for Continuous Integration (CI), or an explanation that CI
-  is not being done
-\item Specific performance measuring tools (like Valgrind), if
-  appropriate
-\item Tools you will likely be using?
+\item \textbf{Language}: Python, with C++/CUDA if custom kernel work is
+needed later.
+\item \textbf{Libraries/frameworks}: PyTorch, Hugging Face Transformers,
+FlashAttention, and (later) a fork of vLLM's scheduler/\texttt{BlockManager}.
+\item \textbf{Pre-trained models}: we will use existing open-weight LLMs
+(e.g. Llama/Qwen family) rather than training our own model --- this
+project is about serving-system performance, not model quality.
+\item \textbf{Linting}: \texttt{ruff}/\texttt{black} for Python.
+\item \textbf{Testing}: \texttt{pytest}, comparing fused-pass logits
+against a separate-pass baseline for correctness.
+\item \textbf{Code coverage}: \texttt{coverage.py} (to be investigated
+further once the codebase exists).
+\item \textbf{CI}: GitHub Actions (already building/deploying
+documentation; will be extended to run lint/tests).
+\item \textbf{Performance measurement}: NVIDIA Nsight Systems and the
+PyTorch Profiler, benchmarking on the department's GPU clusters
+(\texttt{ada}: 12$\times$ L40s for development, \texttt{grace}: 4$\times$
+H100 for benchmarking).
+\item Git, GitHub, and GitHub Projects for version control and project
+tracking.
 \end{itemize}
-
-\wss{git, GitHub and GitHub projects should be part of your technology.}
 
 \section{Use of AI and LLMs}
 
-\wss{This section is a continuation of the previous section.  The role of LLMs
-in your project as important enough to warrant their own section.  
-How will your team be using LLMs for code and documentation development?  
-What tools will you be using?  How will you verify the output of your LLMs?}
+\todo{CONFIRM WITH TEAM before submitting.}
+
+The team is using LLM coding assistants (Claude Code, and potentially
+GitHub Copilot) to accelerate boilerplate code, draft and structure
+documentation, and research related systems literature (e.g. comparing our
+approach against vLLM/SGLang/Medusa). AI-generated code and text is
+reviewed by a team member before being merged; the team verifies technical
+claims (especially about the internals of existing systems like vLLM)
+against primary sources rather than trusting LLM output directly. AI is
+not used to make architectural or grading-relevant decisions without team
+review.
 
 \section{Coding Standard}
 
-\wss{What coding standard will you adopt?}
+Python code will follow PEP 8, enforced via \texttt{ruff}/\texttt{black},
+with type hints and docstrings on public functions. This will be
+revisited once we know whether C++/CUDA code is needed.
 
 \newpage{}
 
 \section{Appendix --- Generative AI Use Disclosure}
 
-\wss{ChatGPT (version 5) was used to brainstorm ideas for the template for this disclose section.}
-
-\wss{This section is about the use of AI to write this document, not your
-planned use of AI for your project.  You discuss that topic in one of the
-sections in the body of this report.}
-
 \subsection{AI Tools Used}
 
-\wss{Give the name of the AI tool(s) used and the version.}
+Claude (Claude Sonnet 5), used via the Claude Code CLI.
 
 \subsection{How and Where Used}
 
-\wss{Explain what the tool(s) were used for.  Examples include: brainstorming,
-explaining a technical concept, reviewing the document, generating or modifying
-text, generating or modifying diagrams, identifying errors or omissions or
-inconsistencies.}
-
-\wss{For each of the uses, identify which parts of the document were affected.}
-
-\wss{You do not need to report every interaction, but you should disclose the 
-uses that materially contributed to your work}
+Claude was used to draft the initial structure and text of this Development
+Plan (Sections 1--10 and this appendix) from information and decisions
+provided by the team, and to help brainstorm and refine the technical
+approach of the Tandem project itself, including identifying which parts of
+the design are genuinely novel versus already implemented by existing
+systems such as vLLM/SGLang.
 
 \subsection{Verification of AI-Generated Content}
 
-\wss{\begin{itemize}
-    \item Describe how the team checked AI-generated or AI-assisted material
-    before including it in the document.
-    \item In particular, verify factual claims, technical assertions,
-    requirements, calculations, references, and other information for which an
-    AI system may produce incorrect or fabricated results.
-    \item \textbf{The team is responsible for the accuracy, completeness,
-consistency, and appropriateness of the submitted document, regardless of
-whether material was generated by a human or an AI system.}
-\end{itemize}}
+\todo{CONFIRM WITH TEAM before submitting: describe the team's actual
+review pass.}
+
+The team reviewed all AI-drafted text before including it in this document
+and will revise sections (meeting logistics, roles, schedule, etc.) to
+reflect the team's actual decisions rather than AI-proposed defaults.
+Technical claims about existing systems (e.g. vLLM's prefix caching and
+Copy-on-Write behaviour) were checked against those projects' own
+documentation. The team is responsible for the accuracy, completeness,
+consistency, and appropriateness of this document, regardless of whether
+material was AI- or human-generated.
 
 \newpage{}
 
@@ -207,13 +242,22 @@ whether material was generated by a human or an AI system.}
 
 \input{../Reflection.text}
 
+\todo{CONFIRM WITH TEAM: draft answers below, replace with your own.}
+
 \begin{enumerate}
-    \item Why is it important to create a development plan prior to starting the
-    project?
-    \item In your opinion, what are the advantages and disadvantages of using
-    CI/CD?
-    \item What disagreements did your group have in this deliverable, if any,
-    and how did you resolve them?
+    \item A development plan forces the team to make explicit decisions
+    (workflow, communication, roles, schedule) before deadline pressure
+    hits, so disagreements about ``how we work'' get resolved once instead
+    of repeatedly derailing later deliverables.
+    \item CI/CD catches build/documentation errors and (later) test
+    failures before they reach \texttt{main}, and automates otherwise
+    tedious tasks like PDF generation and deployment. The main disadvantage
+    is upfront setup/maintenance cost, and that a flaky or slow pipeline
+    can become a bottleneck if not kept reliable.
+    \item Draft: no major disagreements yet at this stage; the team was
+    initially considering a broader, more general project before narrowing
+    scope to the two specific systems gaps described in this plan, which
+    was a scope discussion rather than a disagreement.
 \end{enumerate}
 
 \newpage{}
@@ -226,68 +270,64 @@ whether material was generated by a human or an AI system.}
 
 \subsection*{External Goals}
 
-\wss{What are your team's external goals for this project? These are not the
-goals related to the functionality or quality fo the project.  These are the
-goals on what the team wishes to achieve with the project.  Potential goals are
-to win a prize at the Capstone EXPO, or to have something to talk about in
-interviews, or to get an A+, etc.}
+\todo{CONFIRM WITH TEAM.}
+
+Draft: build something substantial enough to be a genuine portfolio/interview
+talking point in systems engineering, and aim for a strong final grade;
+stretch goal of presenting at the Capstone EXPO if results are compelling.
 
 \subsection*{Attendance}
 
 \subsubsection*{Expectations}
 
-\wss{What are your team's expectations regarding meeting attendance (being on
-time, leaving early, missing meetings, etc.)?}
+Team members are expected to attend all scheduled team meetings on time and
+stay for the full meeting; if unable to attend, notify the team as far in
+advance as possible.
 
 \subsubsection*{Acceptable Excuse}
 
-\wss{What constitutes an acceptable excuse for missing a meeting or a deadline?
-What types of excuses will not be considered acceptable?}
+Illness, other course/exam conflicts, and emergencies are acceptable
+excuses. Simply forgetting, or deprioritizing without advance notice, is
+not.
 
 \subsubsection*{In Case of Emergency}
 
-\wss{What process will team members follow if they have an emergency and cannot
-attend a team meeting or complete their individual work promised for a team
-deliverable?}
+Notify the team chat and the meeting chair as soon as possible; the
+notetaker will bring the absent member up to speed on decisions/action
+items afterward.
 
 \subsection*{Accountability and Teamwork}
 
-\subsubsection*{Quality} 
+\subsubsection*{Quality}
 
-\wss{What are your team's expectations regarding the quality
-of team members' preparation for team meetings and the quality of the
-deliverables that members bring to the team?}
+Members are expected to come to meetings having completed their agreed-upon
+work, or to flag blockers before the meeting rather than at it. Pull
+requests should be self-reviewed (tests passing, docs updated) before
+requesting review.
 
 \subsubsection*{Attitude}
 
-\wss{What are your team's expectations regarding team members' ideas,
-interactions with the team, cooperation, attitudes, and anything else regarding
-team member contributions?  Do you want to introduce a code of conduct?  Do you
-want a conflict resolution plan?  Can adopt existing codes of conduct.}
+We will adopt the
+\href{https://www.contributor-covenant.org/}{Contributor Covenant} as our
+code of conduct. Disagreements are expected to be resolved through
+discussion and, if unresolved, a team vote (see Decision Making below).
 
 \subsubsection*{Stay on Track}
 
-\wss{What methods will be used to keep the team on track? How will your team
-ensure that members contribute as expected to the team and that the team
-performs as expected? How will your team reward members who do well and manage
-members whose performance is below expectations?  What are the consequences for
-someone not contributing their fair share?}
+\todo{CONFIRM WITH TEAM: target metrics and consequences.}
 
-\wss{You may wish to use the project management metrics collected for the TA and
-instructor for this.}
-
-\wss{You can set target metrics for attendance, commits, etc.  What are the
-consequences if someone doesn't hit their targets?  Do they need to bring the
-coffee to the next team meeting?  Does the team need to make an appointment with
-their TA, or the instructor?  Are there incentives for reaching targets early?}
+We will use the course's project management metrics (commits, issue
+activity) as a lightweight check-in signal. If a member consistently
+under-contributes, the team will raise it directly with them first, and
+escalate to the TA/instructor only if it persists.
 
 \subsubsection*{Team Building}
 
-\wss{How will you build team cohesion (fun time, group rituals, etc.)? }
+\todo{CONFIRM WITH TEAM.}
 
-\subsubsection*{Decision Making} 
+\subsubsection*{Decision Making}
 
-\wss{How will you make decisions in your group? Consensus?  Vote? How will you
-handle disagreements? }
+Default to consensus; if consensus isn't reached after discussion, decide
+by majority vote among team members.
 
 \end{document}
