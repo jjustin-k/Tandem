@@ -1,8 +1,14 @@
-# Project Name
+# Tandem
 
 Developer Names:
+Justin Kwinecki
+Zayed Umer
+William Pol
+Manav Patel
+Musab Mondal
 
 Date of project start:
+September 21, 2026
 
 This project is ...
 
