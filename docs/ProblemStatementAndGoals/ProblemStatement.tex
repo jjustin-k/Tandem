@@ -22,7 +22,7 @@
 \toprule
 \textbf{Date} & \textbf{Developer(s)} & \textbf{Change}\\
 \midrule
-Date1 & Name(s) & Description of changes\\
+Spetember 22 & Justin Kwinecki & Initial Problem Statement and Goals\\
 Date2 & Name(s) & Description of changes\\
 ... & ... & ...\\
 \bottomrule
@@ -40,11 +40,15 @@ information.}
 
 \subsection{Problem}
 
-\wss{What problem are you trying to solve?  Why is it important? Do not talk
-about how you will solve the problem, only what the problem is.  AI is rarely
-part of the problem.  The problem is ``what'' you want to do, not ``how'' you
-want to do it.  The problem statement should be written in a way that is
-understandable to a non-technical audience.}
+Modern LLM applications increasingly rely on multiple agents that interact with the same underlying context.
+These agents often process a shared prompt or prompt tree, causing the same prefix information to be recomputed 
+independently for each request. As the number of simultaneous agents increases, this redundant computation 
+increases inference latency, wastes computational resources, and limits the scalability of multi-agent LLM systems.
+
+The problem is to extend an LLM serving engine so that requests from multiple agents can efficiently recognize and 
+exploit shared prompt prefixes during prefill. The system should combine shared portions of the prompt tree into a 
+single prefill operation and coordinate simultaneous requests so that shared prefixes are computed once rather than 
+repeatedly.
 
 \subsection{Inputs and Outputs}
 
@@ -60,10 +64,25 @@ is summarized as part of the developer plan.}
 
 \section{Goals}
 
+\begin{itemize}
+
+\item \textbf{Reduce redundant computation:} Reduce the amount of computation required to prefill shared prompt context across simultaneous agent requests.
+\item \textbf{Reduce inference latency:} Decrease prefill latency for multi-agent workloads with overlapping context.
+\item \textbf{Improve serving throughput:} Increase the number of multi-agent requests that can be served within a given period when requests share prompt context.
+\item \textbf{Preserve correctness: Ensure:} that sharing prefill computation does not change the resulting model behavior compared with independent request processing.
+\item \textbf{Maintain existing functionality:} Continue to support requests without shared context through the existing serving workflow.
+
+\end{itemize}
+
 \section{Stretch Goals}
 
-\wss{Goals you hope to get to, but not necessary.  They are also helpful if the
-scope of the original project needs to be expanded.}
+\begin{itemize}
+\item \textbf{Improve scalability:} Demonstrate that the benefits increase as the number of simultaneous agents sharing context grows.
+\item \textbf{Support dynamic prompt trees:} Efficiently handle agents that branch from shared context at different points in their interactions.
+\item \textbf{Optimize resource utilization:} Reduce unnecessary GPU computation or memory usage resulting from repeated processing of shared context.
+\item \textbf{Evaluate broader workloads:} Measure performance across different prompt sizes, degrees of prefix overlap, and numbers of concurrent agents.
+\item \textbf{Demonstrate substantial performance gains:} Establish measurable improvements over independent prefill across representative multi-agent workloads.
+\end{itemize}
 
 \section{Custom Documents (CDs)}
 
