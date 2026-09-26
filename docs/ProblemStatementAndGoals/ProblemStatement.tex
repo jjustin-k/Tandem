@@ -23,7 +23,7 @@
 \textbf{Date} & \textbf{Developer(s)} & \textbf{Change}\\
 \midrule
 Spetember 22 & Justin Kwinecki & Initial Problem Statement and Goals\\
-Date2 & Name(s) & Description of changes\\
+September 26 & Justin Kwinecki & Finished Section 1\\
 ... & ... & ...\\
 \bottomrule
 \end{tabularx}
@@ -46,16 +46,61 @@ independently for each request. As the number of simultaneous agents increases, 
 increases inference latency, wastes computational resources, and limits the scalability of multi-agent LLM systems.
 
 The problem is to extend an LLM serving engine so that requests from multiple agents can efficiently recognize and 
-exploit shared prompt prefixes during prefill. The system should combine shared portions of the prompt tree into a 
-single prefill operation and coordinate simultaneous requests so that shared prefixes are computed once rather than 
-repeatedly.
+exploit shared prompt prefixes during prefill. The system should reuse shared portions of the prompt tree across 
+simultaneous requests, avoiding redundant computation during prefill.
 
 \subsection{Inputs and Outputs}
 
-\wss{Characterize the problem in terms of ``high level'' inputs and outputs.  
-Use abstraction so that you can avoid details.}
+\noindent\textbf{Inputs}
+
+\begin{itemize}
+    \item A set of concurrent LLM inference requests.
+    \item The input token sequences associated with each request.
+\end{itemize}
+
+\noindent\textbf{Outputs}
+
+\begin{itemize}
+    \item A generated response for each inference request.
+    \item Shared context cache containing reusable prefill 
+    state for common prompt prefixes.
+\end{itemize}
 
 \subsection{Stakeholders}
+
+\begin{itemize}
+
+    \item \textbf{LLM Inference Engineers:}
+    Engineers who develop and maintain LLM serving infrastructure. They are stakeholders because 
+    they may integrate, configure, evaluate, and maintain the shared prefill and context management 
+    functionality within the serving engine.
+
+    \item \textbf{AI Infrastructure Engineers:}
+    Engineers who operate infrastructure for serving LLM applications at scale. They are interested 
+    in reducing computational overhead, improving GPU utilization, and increasing system scalability.
+
+    \item \textbf{LLM Application Developers:}
+    Developers who build multi-agent applications that generate multiple requests with shared context.
+    They benefit from reduced inference latency and more efficient reuse of shared prompt prefixes.
+   
+    \item \textbf{Independent Developers:}
+    Individual developers who run open-source or self-hosted multi-agent LLM applications with limited 
+    computational resources. They are interested in reducing redundant computation and GPU memory usage
+    so that multi-agent workloads can run efficiently on more modest hardware.
+
+    \item \textbf{Organizations Deploying LLM Applications:}
+    Organizations that operate multi-agent LLM systems at scale. They are interested in reducing inference
+    costs, improving application responsiveness, and supporting a larger number of concurrent requests.
+
+    \item \textbf{Cloud and GPU Infrastructure Providers:}
+    Providers of the computational resources used for LLM inference. More efficient prefill computation 
+    can improve resource utilization and reduce the amount of GPU compute required to serve workloads.
+
+    \item \textbf{End Users:}
+    Users who interact with applications powered by multi-agent LLM systems. They benefit indirectly 
+    from reduced latency and improved responsiveness.
+
+\end{itemize}
 
 \subsection{Environment}
 
