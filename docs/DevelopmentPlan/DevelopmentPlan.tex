@@ -99,10 +99,9 @@ of the \href{https://github.com/jjustin-k/Tandem}{project repository}.
 
 \section{Team Meeting Plan}
 
-\todo{CONFIRM WITH TEAM: fill in the day and time of the weekly meeting.}
-
 \paragraph{When and where.} The team meets once a week for up to one hour,
-on \textit{[day/time TBD]}. Meetings alternate between in person on campus
+on Mondays from 6:00 to 7:00 pm, separate from the Wednesday TA-team
+meeting slot. Meetings alternate between in person on campus
 and online through a Microsoft Teams call, so that at least every second
 meeting is in person. Physical meeting locations are shared in the team
 chat, not in this public repository. When a lecture or tutorial slot has
@@ -292,10 +291,6 @@ lets the team compare later work against it.
   addresses them, or a short explanation if no change is made.
 \end{itemize}
 
-\todo{Create the \texttt{meeting}, \texttt{review}, \texttt{research}, and
-\texttt{area:*} labels in the repository; the existing issue templates
-already reference \texttt{meeting} and \texttt{review}.}
-
 \subsection{Continuous Integration}
 
 \begin{itemize}
@@ -317,11 +312,10 @@ already reference \texttt{meeting} and \texttt{review}.}
 
 \section{Project Decomposition and Scheduling}
 
-\todo{Create a GitHub Project board for Tandem and add its link here.}
-
-The team uses a GitHub Project board with the columns Backlog, To Do, In
-Progress, In Review, and Done. Every issue is on the board, and the board
-is reviewed during each weekly meeting.
+The team uses a GitHub Project board,
+\href{https://github.com/users/jjustin-k/projects/11}{Tandem Kanban}, with
+the columns Backlog, Ready, In Progress, In Review, and Done. Every issue is
+on the board, and the board is reviewed during each weekly meeting.
 
 Table~\ref{TblSchedule} combines the course deadlines with our technical
 milestones. Dates for Term 1 are from the course's weekly announcements;
@@ -412,10 +406,16 @@ The PoC is planned around the risks most likely to stop the project:
   \end{enumerate}
   For each scenario, and for several values of $K$ and trunk length, we
   report the time to first token (TTFT) and the number of prompt tokens
-  vLLM actually processed (taken from its metrics, not estimated). If
-  simultaneous arrival processes close to $K$ copies of the trunk while
-  the warm cache processes one, the gap Tandem targets is real, and the
-  difference between the two scenarios is the most Tandem can save.
+  vLLM actually processed (taken from its metrics, not estimated). Since
+  vLLM's paged KV cache uses a fixed number of bytes per token, prompt
+  tokens processed is also a direct stand-in for KV cache memory: fewer
+  tokens computed means less KV cache memory allocated. If simultaneous
+  arrival processes close to $K$ copies of the trunk while the warm cache
+  processes one, the gap Tandem targets is real, and the difference
+  between the two scenarios is the most Tandem can save. Reporting actual
+  GPU memory usage and KV cache read/write throughput directly, rather
+  than deriving them from token counts, is a backlog item for later
+  benchmarking once the measurement moves past this PoC scale.
   \item \textbf{Risk 2: tree attention correctness.} A PyTorch program
   packs a shared trunk and several branches into one sequence, builds the
   tree attention mask and per-branch position IDs, runs one forward pass,
@@ -486,9 +486,9 @@ CI & GitHub Actions for documents (running) and code (planned).\\
 Performance tools & PyTorch Profiler and NVIDIA Nsight Systems, on the
 department clusters (\texttt{ada}, 12$\times$ L40S, for development;
 \texttt{grace}, 4$\times$ H100, for final benchmarks).\\
-Editor & VS Code, both locally and on the department clusters through
-its Remote-SSH extension, so the same editor is used on a laptop and on a
-GPU machine.\\
+Editor & VS Code and Cursor, both locally and on the department clusters
+through Remote-SSH, so the same editor is used on a laptop and on a GPU
+machine.\\
 Notebooks & Jupyter notebooks for quick demos and exploration. They run
 locally, on Google Colab, or on a cluster through VS Code. Code that the
 team keeps is moved into regular Python files with tests.\\
@@ -503,8 +503,9 @@ Project tools & git, GitHub, GitHub Projects, Microsoft Teams.\\
 \section{Use of AI and LLMs}
 
 \begin{itemize}
-  \item \textbf{Tools:} Claude Code for code, debugging, and document
-  drafting; GitHub Copilot code review on pull requests.
+  \item \textbf{Tools:} Claude Code and OpenAI Codex for code, debugging,
+  and document drafting; GitHub Copilot code review on pull requests;
+  Granola for meeting notes and summaries.
   \item \textbf{Code:} AI-written code is held to the same standard as any
   other code: it is reviewed in a PR and must pass the tests. For
   correctness-critical code, such as the attention mask, the author must
@@ -591,8 +592,10 @@ for the team to read, and drafted the bibliography entries.\\
 
 \subsection{Verification of AI-Generated Content}
 
-\todo{CONFIRM WITH TEAM: add who reviewed the document and anything they
-changed.}
+William Pol drafted this document with Claude Code from decisions made by
+the team, and Zayed Umer reviewed the pull request, requesting the branch
+naming, PoC memory/throughput metrics, and tooling changes reflected in
+this version. The whole team reviews the document again before submission.
 
 \begin{itemize}
   \item \textbf{Decisions:} meeting format, communication tool, role
@@ -651,8 +654,6 @@ Charter template.
 
 \subsection*{External Goals}
 
-\todo{TEAM TO REWRITE IN YOUR OWN WORDS.}
-
 Build something substantial enough to be a genuine portfolio and interview
 talking point in systems engineering, and aim for a strong final grade;
 present at the Capstone EXPO if the results are compelling.
@@ -699,9 +700,6 @@ discussion and, if unresolved, a team vote (see Decision Making below).
 
 \subsubsection*{Stay on Track}
 
-\todo{TEAM TO CONFIRM: adjust the thresholds below to what the team agrees
-on.}
-
 We use the course's project management metrics (commits, issue activity) as
 a lightweight check-in signal, with a quantified trigger: if a member has no
 commits or issue activity and misses two consecutive weekly meetings
@@ -711,7 +709,11 @@ weeks, the team will escalate to the TA.
 
 \subsubsection*{Team Building}
 
-\todo{TEAM TO WRITE.}
+The team eats together after milestone deliverables (Problem Statement,
+PoC demo, Rev 0 demo, Final demo) to mark the milestone and decompress
+before the next one starts. Weekly meetings open with a few minutes of
+non-project conversation before the agenda starts, so meetings stay a
+place the team wants to show up to, not just a status check.
 
 \subsubsection*{Decision Making}
 
