@@ -1,163 +1,243 @@
-\documentclass{article}
+\documentclass[11pt]{article}
 
+\usepackage[margin=1in]{geometry}
 \usepackage{tabularx}
 \usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{float}
 
-\title{Problem Statement and Goals\\\progname}
-
-\author{\authname}
-
-\date{}
+\setlength{\emergencystretch}{3em}
 
 \input{../Comments.text}
 \input{../Common.text}
+
+\title{Problem Statement and Goals\\\progname}
+\author{\authname}
+\date{}
 
 \begin{document}
 
 \maketitle
 
-\begin{table}[hp]
+Table~\ref{TblRevisionHistory} records the changes to this document.
+
+\begin{table}[H]
 \caption{Revision History} \label{TblRevisionHistory}
 \begin{tabularx}{\textwidth}{llX}
 \toprule
 \textbf{Date} & \textbf{Developer(s)} & \textbf{Change}\\
 \midrule
-Spetember 22 & Justin Kwinecki & Initial Problem Statement and Goals\\
-September 26 & Justin Kwinecki & Finished Section 1\\
-... & ... & ...\\
+Sept 22, 2026 & Justin Kwinecki & Initial problem statement and goals\\
+Sept 27, 2026 & Zayed Umer & Revise problem statement and goals;
+see disclosure appendix\\
+Sept 27, 2026 & Zayed Umer & Cut repetition and clarify wording\\
+Sept 27, 2026 & Zayed Umer & Revise the problem section from review\\
 \bottomrule
 \end{tabularx}
 \end{table}
 
 \section{Problem Statement}
 
-\wss{You should check your problem statement with the
-\href{https://smiths.github.io/capTemplate/Checklists/ProbState-Checklist.pdf}
-{problem statement checklist}}. 
-
-\wss{You can change the section headings, as long as you include the required
-information.}
+\progname{} aims to reduce repeated prompt processing when several software
+agents use the same background information.
 
 \subsection{Problem}
 
-Modern LLM applications increasingly rely on multiple agents that interact with the same underlying context.
-These agents often process a shared prompt or prompt tree, causing the same prefix information to be recomputed 
-independently for each request. As the number of simultaneous agents increases, this redundant computation 
-increases inference latency, wastes computational resources, and limits the scalability of multi-agent LLM systems.
+Modern applications increasingly use several agents that work from the same
+underlying context. Each agent submits its own request, but those requests
+share a long prefix: the identical opening of their prompts. Before a model
+can generate a response, it processes the prompt in a phase called prefill.
+When each request prefills that shared prefix on its own, the same work is
+repeated.
 
-The problem is to extend an LLM serving engine so that requests from multiple agents can efficiently recognize and 
-exploit shared prompt prefixes during prefill. The system should reuse shared portions of the prompt tree across 
-simultaneous requests, avoiding redundant computation during prefill.
+As more agents run at the same time, the repeated prefill delays responses,
+wastes computing capacity, and limits how many requests can be served.
+Existing serving software can reuse a prefix only after it has already been
+processed \cite{vLLMPrefixCaching}. The repeated work remains when requests
+arrive together, or while their shared prefix is still being processed.
+
+The problem is to reuse a shared prefix during prefill across simultaneous
+requests, so that work is done once, while each request's model output
+stays the same.
+
+\subsection{Scope}
+\label{sec:scope}
+
+Tandem targets concurrent text-generation requests that use the same model
+and share an identical prefix followed by different instructions. Requests
+may arrive together or a short time apart. Requests without shared context
+serve as a compatibility check.
+
+Evaluation will compare identical workloads, models, hardware, and
+generation settings with and without Tandem's changes. The baseline will
+retain the serving engine's existing prefix reuse features. The project
+excludes model training, agent orchestration, document retrieval,
+application interfaces, and operation across multiple servers. Reuse of
+similar but differently worded context is also outside the scope.
+
+The proof of concept will test whether the baseline repeats work and
+whether Tandem preserves model results. If an optimization is infeasible,
+the fallback is a tool that measures and reports repeated prompt
+processing. The team would revise the goals with the teaching assistant
+(TA) and instructor. The
+\href{../DevelopmentPlan/DevelopmentPlan.pdf}{Development Plan} describes
+that evaluation and fallback.
 
 \subsection{Inputs and Outputs}
 
-\noindent\textbf{Inputs}
-
-\begin{itemize}
-    \item A set of concurrent LLM inference requests.
-    \item The input token sequences associated with each request.
+The inputs are:
+\begin{itemize}[noitemsep]
+  \item Requests, each with an identifier, prompt, and generation settings
+  such as the maximum response length and sampling controls.
+  \item A trained model and the encoding rules that convert text into
+  tokens, the units the model processes.
+  \item For evaluation, the requests' arrival times and the serving
+  configuration.
 \end{itemize}
 
-\noindent\textbf{Outputs}
-
-\begin{itemize}
-    \item A generated response for each inference request.
-    \item Shared context cache containing reusable prefill 
-    state for common prompt prefixes.
+The outputs are:
+\begin{itemize}[noitemsep]
+  \item Generated text for each accepted request, with its identifier and
+  a completion status or failure indication.
+  \item Evaluation results: response timing, completed requests per
+  second, prompt tokens processed, and agreement with baseline outputs.
+  Results include the workload and configuration needed to reproduce them.
 \end{itemize}
 
 \subsection{Stakeholders}
 
 \begin{itemize}
-
-    \item \textbf{LLM Inference Engineers:}
-    Engineers who develop and maintain LLM serving infrastructure. They are stakeholders because 
-    they may integrate, configure, evaluate, and maintain the shared prefill and context management 
-    functionality within the serving engine.
-
-    \item \textbf{AI Infrastructure Engineers:}
-    Engineers who operate infrastructure for serving LLM applications at scale. They are interested 
-    in reducing computational overhead, improving GPU utilization, and increasing system scalability.
-
-    \item \textbf{LLM Application Developers:}
-    Developers who build multi-agent applications that generate multiple requests with shared context.
-    They benefit from reduced inference latency and more efficient reuse of shared prompt prefixes.
-   
-    \item \textbf{Independent Developers:}
-    Individual developers who run open-source or self-hosted multi-agent LLM applications with limited 
-    computational resources. They are interested in reducing redundant computation and GPU memory usage
-    so that multi-agent workloads can run efficiently on more modest hardware.
-
-    \item \textbf{Organizations Deploying LLM Applications:}
-    Organizations that operate multi-agent LLM systems at scale. They are interested in reducing inference
-    costs, improving application responsiveness, and supporting a larger number of concurrent requests.
-
-    \item \textbf{Cloud and GPU Infrastructure Providers:}
-    Providers of the computational resources used for LLM inference. More efficient prefill computation 
-    can improve resource utilization and reduce the amount of GPU compute required to serve workloads.
-
-    \item \textbf{End Users:}
-    Users who interact with applications powered by multi-agent LLM systems. They benefit indirectly 
-    from reduced latency and improved responsiveness.
-
+  \item \textbf{Application developers, including independent developers:}
+  need faster responses without changing their agents' tasks or results.
+  \item \textbf{Serving-engine maintainers:} need changes they can
+  integrate and maintain, supported by correctness and compatibility tests.
+  \item \textbf{Infrastructure operators and deploying organizations:}
+  need to serve more requests within their hardware capacity and budget.
+  \item \textbf{Application end users:} need timely responses that are
+  unaffected by other agents' private instructions.
+  \item \textbf{The capstone team, TA, and instructor:} need a feasible
+  scope and reproducible evidence that the project meets its goals.
 \end{itemize}
 
 \subsection{Environment}
 
-\wss{Hardware and Software Environment for the users.  The developer environment
-is summarized as part of the developer plan.}
+Developers and operators will run Tandem on a local or remote Linux server
+with a supported graphics processing unit (GPU) and enough memory for the
+selected model and requests. They supply the model and compatible serving
+software. Applications submit requests through a programmatic interface;
+end users interact with those applications.
+
+Initial evaluation uses one server and one model configuration at a time.
+The Development Plan covers developer tools and laboratory hardware.
 
 \section{Goals}
 
-\begin{itemize}
+These goals will be refined into acceptance criteria in the Software
+Requirements Specification and test procedures in the Verification and
+Validation Plan. Performance comparisons use the baseline in
+Section~\ref{sec:scope}, repeated runs, and reported variation. Improvements
+must exceed that variation.
 
-\item \textbf{Reduce redundant computation:} Reduce the amount of computation required to prefill shared prompt context across simultaneous agent requests.
-\item \textbf{Reduce inference latency:} Decrease prefill latency for multi-agent workloads with overlapping context.
-\item \textbf{Improve serving throughput:} Increase the number of multi-agent requests that can be served within a given period when requests share prompt context.
-\item \textbf{Preserve correctness: Ensure:} that sharing prefill computation does not change the resulting model behavior compared with independent request processing.
-\item \textbf{Maintain existing functionality:} Continue to support requests without shared context through the existing serving workflow.
+\begin{enumerate}[label=G\arabic*., ref=G\arabic*]
+  \item \textbf{Reduce repeated prompt processing.} Process fewer prompt
+  tokens than the baseline on shared-prefix workloads. Count tokens
+  actually processed, including recomputation. Compare simultaneous and
+  staggered arrivals with previously processed and unseen prefixes.
+  \item \textbf{Reduce response delay.} Lower the median and 95th-percentile
+  time to first token: the time from submitting a request to receiving
+  its first generated token, including queueing.
+  \item \textbf{Increase serving capacity.} Complete more requests per
+  second on the same hardware with matched response lengths. Report
+  response delays alongside throughput.
+  \item \textbf{Preserve model behaviour and request independence.}
+  Match baseline output scores within a documented numerical tolerance
+  under controlled settings, including multi-token generation. Verify that
+  changing one agent's private instructions leaves another agent's output
+  scores unchanged within that tolerance.
+  \item \textbf{Preserve ordinary serving.} Continue to handle individual
+  requests and requests without shared context. Pass the baseline's
+  functional checks and measure any added delay or loss of throughput.
+\end{enumerate}
 
-\end{itemize}
+Evaluation will report improvements, regressions, and workloads with no
+measurable change.
 
 \section{Stretch Goals}
 
+After meeting the core goals, the team may pursue:
 \begin{itemize}
-\item \textbf{Improve scalability:} Demonstrate that the benefits increase as the number of simultaneous agents sharing context grows.
-\item \textbf{Support dynamic prompt trees:} Efficiently handle agents that branch from shared context at different points in their interactions.
-\item \textbf{Optimize resource utilization:} Reduce unnecessary GPU computation or memory usage resulting from repeated processing of shared context.
-\item \textbf{Evaluate broader workloads:} Measure performance across different prompt sizes, degrees of prefix overlap, and numbers of concurrent agents.
-\item \textbf{Demonstrate substantial performance gains:} Establish measurable improvements over independent prefill across representative multi-agent workloads.
+  \item \textbf{Support deeper branching.} Extend correctness and
+  performance evaluation to prompts with several shared branching points,
+  including branches introduced during an ongoing interaction.
+  \item \textbf{Support more configurations.} Repeat the evaluation on
+  additional models or GPUs to test whether the benefits persist.
+  \item \textbf{Reduce memory demand.} Use less peak GPU memory than the
+  matched baseline for shared-context workloads and measure whether this
+  permits more concurrent requests within the same memory limit.
 \end{itemize}
 
 \section{Custom Documents (CDs)}
 
-\wss{For CAS 741: State whether the project is a research project. This
-designation, with the approval (or request) of the instructor, can be modified
-over the course of the term.}
+The Development Plan draft proposes these custom documents, subject to
+instructor approval:
 
-\wss{For SE Capstone: List your custom documents (CDs).  Potential CDs include
-usability testing, code walkthroughs, user documentation, formal proof,
-GenderMag personas, Design Thinking, etc.  (The full list is on the course
-outline and in Lecture 02.) Normally the number of CDs will be two (one per
-term).  Approval of the CDs will be part of the discussion with the instructor
-for approving the project. The CDs, with the approval (or request) of the
-instructor, can be modified over the course of the term.}
+\begin{itemize}
+  \item \textbf{Fall: Machine Learning Model Report.} Justify the selected
+  model, evaluation prompts, and correctness checks. Discuss model and data
+  limitations, and explain why training procedures do not apply.
+  \item \textbf{Winter: Performance Report.} Analyze repeated processing,
+  response delay, throughput, and resource use. Record configurations,
+  workloads, repeated trials, variation, and failure cases. The Verification
+  and Validation Report will reference this analysis when assessing
+  whether requirements were met.
+\end{itemize}
 
-\newpage{}
+\bibliographystyle{plain}
+\bibliography{../../refs/References}
+
+\section*{Appendix --- Generative AI Use Disclosure}
+
+OpenAI Codex revised all sections using Justin Kwinecki's initial draft
+and proposed additions, the Development Plan draft, repository checklists,
+and course outline. It checked the cited prefix-caching documentation,
+edited for clarity and concision, and built and inspected the PDF. No
+performance experiments were run or novelty established.
+
+Zayed Umer supplied reflection notes about collaborative brainstorming,
+the difficulty of finding a novel idea, and the motivation to improve
+memory use even modestly. Codex edited those notes and connected them to
+the proposed scope. The team remains responsible for reviewing the wording,
+claims, and scope before submission.
 
 \section*{Appendix --- Reflection}
 
-\wss{Not required for CAS 741}
-
-\input{../Reflection.text}
-
 \begin{enumerate}
-    \item What went well while writing this deliverable? 
-    \item What pain points did you experience during this deliverable, and how
-    did you resolve them?
-    \item How did you and your team adjust the scope of your goals to ensure
-    they are suitable for a Capstone project (not overly ambitious but also of
-    appropriate complexity for a senior design project)?
-\end{enumerate}  
+  \item \textbf{What went well while writing this deliverable?}
+
+  We agreed early that we wanted to work on inference. That shared
+  interest made brainstorming collaborative: we could build on each
+  other's ideas and focus on which problem to tackle.
+
+  \item \textbf{What pain points did you experience during this
+  deliverable, and how did you resolve them?}
+
+  Finding a novel idea was harder than choosing the topic. With so much
+  inference research underway, we struggled to tell whether an idea
+  addressed an open problem. That uncertainty remains. We plan to review
+  existing work and measure the selected serving engine before committing
+  to an optimization. The proof of concept will test whether our proposed
+  contribution is needed.
+
+  \item \textbf{How did you and your team adjust the scope of your goals
+  to ensure they are suitable for a Capstone project?}
+
+  We wanted to improve inference resource use, especially memory, even
+  if the gain was modest. The proposed scope turns that motivation into
+  one workload we can measure: requests sharing the same context. Using
+  existing models lets us focus on serving-system design, correctness, and
+  performance. Memory savings and broader model support remain stretch
+  goals. This gives us a bounded implementation to evaluate within the
+  course, with success judged by reproducible gains.
+\end{enumerate}
 
 \end{document}
