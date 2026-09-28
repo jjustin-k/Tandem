@@ -1,12 +1,12 @@
 %% Common Parts
 
-\newcommand{\progname}{Tandem} % PUT YOUR PROGRAM NAME HERE
+\newcommand{\progname}{Tandem}
 \newcommand{\authname}{Team 11, Tandem
 \\ Justin Kwinecki
-\\ William Pol
 \\ Zayed Umer
-\\ Musab Mondal
-\\ Manav Patel} % AUTHOR NAMES
+\\ William Pol
+\\ Manav Patel
+\\ Musab Mondal} % AUTHOR NAMES
 
 \usepackage{hyperref}
     \hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, filecolor=blue,
