@@ -179,16 +179,28 @@ weekly.\\
 Reviewer & Reviews a pull request before it is merged. Anyone except the
 author; the author requests a reviewer from outside their technical area
 at least once a week, to spread knowledge.\\
-Quality assurance (QA) & For each deliverable, one member who did not
-write most of it checks it against the matching checklist in
-\texttt{docs/Checklists/} and the course rubric, and files issues for
-anything missing. Rotates per deliverable.\\
+Quality assurance (QA) / test engineer & Checks each deliverable against
+the matching checklist in \texttt{docs/Checklists/} and the course rubric
+before submission, and owns testing (writing and running tests, tracking
+coverage) once the codebase exists. One member, not rotating.
+\todo{ASSIGN: not yet decided by the team.}\\
+DevOps & Owns CI (GitHub Actions), the department GPU cluster access and
+setup, and the Python environment. One member, not rotating.
+\todo{ASSIGN: not yet decided by the team.}\\
+Documentation maintainer & Keeps the course documents consistent with
+what has actually been built, and flags when a document is out of date
+with the code. One member, not rotating.
+\todo{ASSIGN: not yet decided by the team.}\\
 Deliverable lead & For each document or demo, one member coordinates who
 writes which part and makes sure it is submitted on time. Rotates per
 deliverable, so every member leads at least one each term.\\
 \bottomrule
 \end{tabularx}
 \end{table}
+
+\todo{QA/test, DevOps, and Documentation maintainer are new roles added in
+response to review feedback; the team still needs to decide who owns each
+at the next team meeting.}
 
 \subsection{Technical Areas}
 
