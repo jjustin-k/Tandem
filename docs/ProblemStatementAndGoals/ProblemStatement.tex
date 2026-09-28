@@ -31,6 +31,7 @@ Sept 22, 2026 & Justin Kwinecki & Initial problem statement and goals\\
 Sept 27, 2026 & Zayed Umer & Revise problem statement and goals;
 see disclosure appendix\\
 Sept 27, 2026 & Zayed Umer & Cut repetition and clarify wording\\
+Sept 27, 2026 & Zayed Umer & Revise the problem section from review\\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -42,21 +43,22 @@ agents use the same background information.
 
 \subsection{Problem}
 
-A large language model (LLM) generates text from an input prompt. An agent
-uses a model to carry out a task. For example, one agent might summarize a
-document while another extracts its key dates. Both submit the same
-document followed by different instructions. The identical beginning of
-their prompts is a shared prefix.
+Modern applications increasingly use several agents that work from the same
+underlying context. Each agent submits its own request, but those requests
+share a long prefix: the identical opening of their prompts. Before a model
+can generate a response, it processes the prompt in a phase called prefill.
+When each request prefills that shared prefix on its own, the same work is
+repeated.
 
-Before generating a response, the model processes the prompt in a phase
-called prefill. Repeating that work for each agent can delay responses and
-consume computing capacity that could serve other requests.
+As more agents run at the same time, the repeated prefill delays responses,
+wastes computing capacity, and limits how many requests can be served.
+Existing serving software can reuse a prefix only after it has already been
+processed \cite{vLLMPrefixCaching}. The repeated work remains when requests
+arrive together, or while their shared prefix is still being processed.
 
-Existing serving software can reuse previously processed prefixes
-\cite{vLLMPrefixCaching}. Tandem will investigate how much repeated work
-remains when requests arrive together or while their shared prefix is
-still being processed. The problem is to reduce that work and the
-resulting delays while preserving each request's model output.
+The problem is to reuse a shared prefix during prefill across simultaneous
+requests, so that work is done once, while each request's model output
+stays the same.
 
 \subsection{Scope}
 \label{sec:scope}
