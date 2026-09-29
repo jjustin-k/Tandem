@@ -1,12 +1,12 @@
 %% Common Parts
 
-\newcommand{\progname}{Tandem} 
+\newcommand{\progname}{Tandem}
 \newcommand{\authname}{Team 11, Tandem
 \\ Justin Kwinecki
 \\ Zayed Umer
 \\ William Pol
 \\ Manav Patel
-\\ Musab Mondal} % AUTHOR NAMES                  
+\\ Musab Mondal} % AUTHOR NAMES
 
 \usepackage{hyperref}
     \hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, filecolor=blue,
