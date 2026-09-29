@@ -626,23 +626,49 @@ or an AI system.
 
 \input{../Reflection.text}
 
-\todo{TEAM TO REWRITE IN YOUR OWN WORDS: the answers below are placeholders
-and are graded on sincerity.}
-
 \begin{enumerate}
-    \item A development plan forces the team to make explicit decisions
-    (workflow, communication, roles, schedule) before deadline pressure
-    hits, so disagreements about ``how we work'' get resolved once instead
-    of repeatedly derailing later deliverables.
-    \item Continuous integration and deployment (CI/CD) catches build and
-    documentation errors, and later test failures, before they reach
-    \texttt{main}, and automates tedious tasks
-    like PDF generation and deployment. The main disadvantages are the
-    setup and maintenance cost, and that a flaky or slow pipeline becomes a
-    bottleneck if it is not kept reliable.
-    \item No major disagreements yet at this stage; the team was
-    initially considering a broader, more general project before narrowing
-    scope to the specific systems gaps described in this plan.
+    \item It is good for the team to review and agree on the terms of how
+    we want to work together and develop this project, so that problems
+    surface early instead of showing up in later deliverables. Making
+    explicit decisions about roles, workflow, and technology, and
+    committing to them as a team, is what prevents those problems in the
+    first place: a decision that is only assumed rather than written down
+    and agreed to is a decision the team can quietly disagree about later,
+    right when there is no time left to resolve it. The PoC plan pushed
+    this further: it required us to assess risk and think honestly about
+    the weaknesses in our own proposal before we had written any code.
+    That exercise directly shaped how we are developing the project, since
+    it pushed us to write and run code early, so that if our core idea was
+    going to fail, it would fail early, not right before a deadline.
+    \item CI/CD is good for making the development pipeline concrete,
+    giving the team an adequate, repeatable framework to develop against.
+    It catches build and documentation errors, and later test failures,
+    before they reach \texttt{main}, and it automates tedious tasks like
+    PDF generation. However, we found CI/CD can be both flaky and too
+    strict at the same time. In the main capstone repository, the
+    pipeline for our project description submission would not let us
+    merge because we had marked ``supervisor agreed'' as false, even
+    though the instructor, Spencer Smith, had told us directly it was fine
+    to proceed without a supervisor for now. Separately, GitHub Pages
+    deployment for our own documentation has worked inconsistently, some
+    runs succeeding and others not, for no clear reason. So while CI/CD is
+    a useful tool, it can become a bottleneck rather than a help if it is
+    not kept reliable, which ties back to the setup and maintenance cost
+    of running it at all.
+    \item Two disagreements came up while writing this deliverable. The
+    first was whether to assign specific names to the newly proposed team
+    roles right now. Some teammates argued that naming people would give
+    the team firmer direction moving forward and make responsibilities
+    clear. Others disagreed, arguing that attaching labels before we had
+    actually worked together was misguided without a proper gauge of each
+    teammate's strengths and weaknesses. We resolved this by deferring the
+    decision rather than forcing an answer either way. The second was
+    about the premise of the project itself: preliminary work for the PoC
+    revealed that one of our core assumptions was weaker than we had first
+    imagined. We agreed the overall direction of the project was still
+    intact, because we have strong passion for this area, but the
+    disagreement made clear that we need to keep testing our assumptions
+    rather than assume the original framing still holds.
 \end{enumerate}
 
 \newpage{}
