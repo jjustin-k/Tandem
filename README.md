@@ -21,5 +21,3 @@ test - Test cases
 etc.
 
 The project documentation is published on [Tandem's GitHub Pages site](https://jjustin-k.github.io/Tandem/).
-
-In repository **Settings → Pages**, set the deployment source to **GitHub Actions**. The `Build LaTeX and Deploy PDFs` workflow publishes the PDF index; deploying from `main` instead publishes this README and can overwrite the index.
