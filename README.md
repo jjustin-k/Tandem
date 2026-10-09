@@ -20,4 +20,6 @@ src - Source code
 test - Test cases
 etc.
 
-The documentation for this project is updated on the project's [GitHub page](https://smiths.github.io/capTemplate/). <!-- update for your project!  -->
+The project documentation is published on [Tandem's GitHub Pages site](https://jjustin-k.github.io/Tandem/).
+
+In repository **Settings → Pages**, set the deployment source to **GitHub Actions**. The `Build LaTeX and Deploy PDFs` workflow publishes the PDF index; deploying from `main` instead publishes this README and can overwrite the index.
