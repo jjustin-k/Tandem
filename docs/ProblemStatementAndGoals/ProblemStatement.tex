@@ -32,54 +32,67 @@ Sept 27, 2026 & Zayed Umer & Revise problem statement and goals;
 see disclosure appendix\\
 Sept 27, 2026 & Zayed Umer & Cut repetition and clarify wording\\
 Sept 27, 2026 & Zayed Umer & Revise the problem section from review\\
+Oct 11, 2026 & Justin Kwinecki & Pivot idea update \\
+Oct 11, 2026 & Justin Kwinecki & Align scope and goals with semantic routing \\
 \bottomrule
 \end{tabularx}
 \end{table}
 
 \section{Problem Statement}
 
-\progname{} aims to reduce repeated prompt processing when several software
-agents use the same background information.
+\progname{} aims to reduce response latency when semantic routing switches
+between models by reducing repeated prompt prefill for shared conversation
+context.
 
 \subsection{Problem}
 
-Modern applications increasingly use several agents that work from the same
-underlying context. Each agent submits its own request, but those requests
-share a long prefix: the identical opening of their prompts. Before a model
-can generate a response, it processes the prompt in a phase called prefill.
-When each request prefills that shared prefix on its own, the same work is
-repeated.
+Semantic routing selects a model for each request based on the request's
+meaning or needs. In a multi-turn interaction, a router may send successive
+requests with the same conversation history to different models. Before a
+model can generate a response, it processes the prompt in a phase called
+prefill. A newly selected model may need to prefill the conversation history
+again, adding delay before it can respond.
 
-As more agents run at the same time, the repeated prefill delays responses,
-wastes computing capacity, and limits how many requests can be served.
-Existing serving software can reuse a prefix only after it has already been
-processed \cite{vLLMPrefixCaching}. The repeated work remains when requests
-arrive together, or while their shared prefix is still being processed.
-
-The problem is to reuse a shared prefix during prefill across simultaneous
-requests, so that work is done once, while each request's model output
-stays the same.
+Repeated prefill increases time to first token and uses computing
+capacity that could serve other requests. Existing serving software can
+reuse a prefix after it has been processed for the same model
+\cite{vLLMPrefixCaching}; a model switch can require the new model to
+process that prefix again. The problem is to reduce this repeated prefill
+latency when routing switches models, while preserving the selected model's
+response and the independence of each request.
 
 \subsection{Scope}
 \label{sec:scope}
 
-Tandem targets concurrent text-generation requests that use the same model
-and share an identical prefix followed by different instructions. Requests
-may arrive together or a short time apart. Requests without shared context
-serve as a compatibility check.
+Tandem targets text-generation requests in a multi-turn interaction where
+semantic routing may select different models for successive turns. The
+requests share conversation history, while the newest user message may
+differ. The initial evaluation will use one server and a defined set of
+models and serving configurations. It will include same-model turns and
+turns routed to a different model, with and without reusable context.
 
-Evaluation will compare identical workloads, models, hardware, and
-generation settings with and without Tandem's changes. The baseline will
-retain the serving engine's existing prefix reuse features. The project
-excludes model training, agent orchestration, document retrieval,
-application interfaces, and operation across multiple servers. Reuse of
-similar but differently worded context is also outside the scope.
+Evaluation will compare identical workloads, routing decisions, models,
+cache hits, and generation settings with and without Tandem's changes. The
+baseline will retain the serving engine's existing prefix reuse features.
+The project excludes training the base language models, development of a
+semantic router, agent orchestration, document retrieval, application
+interfaces, and operation across multiple servers. Reuse of similar but
+differently worded context is outside the initial scope. Reuse across
+different models will be limited to model combinations for which correctness
+can be established.
 
-The proof of concept will test whether the baseline repeats work and
-whether Tandem preserves model results. If an optimization is infeasible,
-the fallback is a tool that measures and reports repeated prompt
-processing. The team would revise the goals with the teaching assistant
-(TA) and instructor. The
+The proof of concept will investigate two approaches. One is a small
+predictor that estimates the target model's key-value (KV) cache from the
+current model's cache. The other is to begin prefill for another model when
+the semantic router's preference starts shifting toward that model, before
+the router selects it. Evaluation will measure response delay, correctness,
+and work spent on predictions or prefill that is not used. Both approaches
+are hypotheses; whether either can reduce switch-time delay while preserving
+the selected model's results is an open question. If neither is feasible,
+the fallback is a tool that measures and reports repeated prompt processing
+during model switches.
+The team would revise the goals with the teaching assistant (TA) and
+instructor. The
 \href{../DevelopmentPlan/DevelopmentPlan.pdf}{Development Plan} describes
 that evaluation and fallback.
 
@@ -87,20 +100,25 @@ that evaluation and fallback.
 
 The inputs are:
 \begin{itemize}[noitemsep]
-  \item Requests, each with an identifier, prompt, and generation settings
-  such as the maximum response length and sampling controls.
-  \item A trained model and the encoding rules that convert text into
-  tokens, the units the model processes.
-  \item For evaluation, the requests' arrival times and the serving
-  configuration.
+  \item Requests, each with an identifier, conversation history, latest
+  user message, and generation settings such as maximum response length
+  and sampling controls.
+  \item The set of trained models available to the router and the encoding
+  rules that convert text into tokens, the units each model processes.
+  \item A routing decision for each request, specifying the selected model.
+  \item For anticipatory prefill, the router's model preference scores as
+  they change during an interaction.
+  \item For evaluation, request arrival times, the serving configuration,
+  and a baseline run using the same routing decisions.
 \end{itemize}
 
 The outputs are:
 \begin{itemize}[noitemsep]
-  \item Generated text for each accepted request, with its identifier and
-  a completion status or failure indication.
-  \item Evaluation results: response timing, completed requests per
-  second, prompt tokens processed, and agreement with baseline outputs.
+  \item Generated text for each accepted request, with its identifier,
+  selected model, and completion status or failure indication.
+  \item Evaluation results: time to first token, end-to-end response time,
+  completed requests per second, prompt tokens processed on each model,
+  and agreement with the baseline output for the same selected model.
   Results include the workload and configuration needed to reproduce them.
 \end{itemize}
 
@@ -123,12 +141,13 @@ The outputs are:
 
 Developers and operators will run Tandem on a local or remote Linux server
 with a supported graphics processing unit (GPU) and enough memory for the
-selected model and requests. They supply the model and compatible serving
-software. Applications submit requests through a programmatic interface;
-end users interact with those applications.
+models and requests. They supply the models, routing decisions, and
+compatible serving software. Applications submit requests through a
+programmatic interface; end users interact with those applications.
 
-Initial evaluation uses one server and one model configuration at a time.
-The Development Plan covers developer tools and laboratory hardware.
+Initial evaluation uses one server and a fixed set of model configurations
+at a time. The Development Plan covers developer tools and laboratory
+hardware.
 
 \section{Goals}
 
@@ -139,24 +158,27 @@ Section~\ref{sec:scope}, repeated runs, and reported variation. Improvements
 must exceed that variation.
 
 \begin{enumerate}[label=G\arabic*., ref=G\arabic*]
-  \item \textbf{Reduce repeated prompt processing.} Process fewer prompt
-  tokens than the baseline on shared-prefix workloads. Count tokens
-  actually processed, including recomputation. Compare simultaneous and
-  staggered arrivals with previously processed and unseen prefixes.
+  \item \textbf{Reduce delay from prefill after model switches.} Reduce
+  the time requests wait for conversation-history prefill when routing
+  selects a different model. Report prompt tokens processed, prediction
+  error, and work spent on prefill that is not used, by model pair and
+  context state.
   \item \textbf{Reduce response delay.} Lower the median and 95th-percentile
   time to first token: the time from submitting a request to receiving
-  its first generated token, including queueing.
+  its first generated token, including queueing and prefill after a model
+  switch.
   \item \textbf{Increase serving capacity.} Complete more requests per
   second on the same hardware with matched response lengths. Report
   response delays alongside throughput.
   \item \textbf{Preserve model behaviour and request independence.}
-  Match baseline output scores within a documented numerical tolerance
-  under controlled settings, including multi-token generation. Verify that
-  changing one agent's private instructions leaves another agent's output
-  scores unchanged within that tolerance.
-  \item \textbf{Preserve ordinary serving.} Continue to handle individual
-  requests and requests without shared context. Pass the baseline's
-  functional checks and measure any added delay or loss of throughput.
+  Match each selected model's baseline output scores within a documented
+  numerical tolerance under controlled settings, including multi-token
+  generation. Verify that changing one request's private instructions
+  leaves another request's output scores unchanged within that tolerance.
+  \item \textbf{Preserve ordinary serving.} Continue to handle requests
+  routed to the same model and requests without shared context. Pass the
+  baseline's functional checks and measure any added delay or loss of
+  throughput.
 \end{enumerate}
 
 Evaluation will report improvements, regressions, and workloads with no
@@ -167,8 +189,8 @@ measurable change.
 After meeting the core goals, the team may pursue:
 \begin{itemize}
   \item \textbf{Support deeper branching.} Extend correctness and
-  performance evaluation to prompts with several shared branching points,
-  including branches introduced during an ongoing interaction.
+  performance evaluation to conversations with several shared branching
+  points, including branches introduced during an ongoing interaction.
   \item \textbf{Support more configurations.} Repeat the evaluation on
   additional models or GPUs to test whether the benefits persist.
   \item \textbf{Reduce memory demand.} Use less peak GPU memory than the
@@ -233,8 +255,9 @@ claims, and scope before submission.
 
   We wanted to improve inference resource use, especially memory, even
   if the gain was modest. The proposed scope turns that motivation into
-  one workload we can measure: requests sharing the same context. Using
-  existing models lets us focus on serving-system design, correctness, and
+  one workload we can measure: successive requests with shared conversation
+  history that semantic routing sends to different models. Using existing
+  models lets us focus on serving-system design, correctness, and
   performance. Memory savings and broader model support remain stretch
   goals. This gives us a bounded implementation to evaluate within the
   course, with success judged by reproducible gains.
