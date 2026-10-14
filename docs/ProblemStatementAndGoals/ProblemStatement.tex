@@ -34,6 +34,7 @@ Sept 27, 2026 & Zayed Umer & Cut repetition and clarify wording\\
 Sept 27, 2026 & Zayed Umer & Revise the problem section from review\\
 Oct 11, 2026 & Justin Kwinecki & Pivot idea update \\
 Oct 11, 2026 & Justin Kwinecki & Align scope and goals with semantic routing \\
+Oct 14, 2026 & Justin Kwinecki & Clarify serving-engine integration focus \\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -56,10 +57,11 @@ again, adding delay before it can respond.
 Repeated prefill increases time to first token and uses computing
 capacity that could serve other requests. Existing serving software can
 reuse a prefix after it has been processed for the same model
-\cite{vLLMPrefixCaching}; a model switch can require the new model to
-process that prefix again. The problem is to reduce this repeated prefill
-latency when routing switches models, while preserving the selected model's
-response and the independence of each request.
+\cite{vLLMPrefixCaching}; after a model switch, the selected model may need
+to process that shared prefix again. This makes model-switch latency and
+repeated prompt processing the project's measurable serving concerns. The
+problem is to reduce that repeated work while preserving the selected
+model's response and the independence of each request.
 
 \subsection{Scope}
 \label{sec:scope}
@@ -67,9 +69,15 @@ response and the independence of each request.
 Tandem targets text-generation requests in a multi-turn interaction where
 semantic routing may select different models for successive turns. The
 requests share conversation history, while the newest user message may
-differ. The initial evaluation will use one server and a defined set of
-models and serving configurations. It will include same-model turns and
-turns routed to a different model, with and without reusable context.
+differ. The project investigates serving-engine integration to reduce
+repeated prefill on a model switch. Its planned approach is to transfer a
+cross-model key-value (KV) cache into the serving engine's KV memory and
+use it when compatible with the request. When reuse is unavailable or
+unusable, the engine uses its native prefill path. The evaluation will use
+one server and a defined set of models and serving configurations. It will
+include same-model turns and turns routed to a different model, with and
+without reusable context. If feasibility work requires a different reuse
+approach, the same workload and native-prefill comparison will apply.
 
 Evaluation will compare identical workloads, routing decisions, models,
 cache hits, and generation settings with and without Tandem's changes. The
@@ -81,20 +89,14 @@ differently worded context is outside the initial scope. Reuse across
 different models will be limited to model combinations for which correctness
 can be established.
 
-The proof of concept will investigate two approaches. One is a small
-predictor that estimates the target model's key-value (KV) cache from the
-current model's cache. The other is to begin prefill for another model when
-the semantic router's preference starts shifting toward that model, before
-the router selects it. Evaluation will measure response delay, correctness,
-and work spent on predictions or prefill that is not used. Both approaches
-are hypotheses; whether either can reduce switch-time delay while preserving
-the selected model's results is an open question. If neither is feasible,
-the fallback is a tool that measures and reports repeated prompt processing
-during model switches.
-The team would revise the goals with the teaching assistant (TA) and
-instructor. The
+The project focuses on serving-engine integration and evaluation, rather
+than developing a new method to predict one model's cache from another.
+Evaluation will compare time to first token after a model switch using the
+chosen reuse approach against the engine's native full-prefill path, while
+checking output correctness and recording reuse failures and fallback
+behavior. The
 \href{../DevelopmentPlan/DevelopmentPlan.pdf}{Development Plan} describes
-that evaluation and fallback.
+the implementation and evaluation approach.
 
 \subsection{Inputs and Outputs}
 
@@ -106,8 +108,9 @@ The inputs are:
   \item The set of trained models available to the router and the encoding
   rules that convert text into tokens, the units each model processes.
   \item A routing decision for each request, specifying the selected model.
-  \item For anticipatory prefill, the router's model preference scores as
-  they change during an interaction.
+  \item For the planned transfer approach, a candidate KV cache and its
+  source model, target model, associated conversation context, and
+  compatibility metadata.
   \item For evaluation, request arrival times, the serving configuration,
   and a baseline run using the same routing decisions.
 \end{itemize}
@@ -118,8 +121,10 @@ The outputs are:
   selected model, and completion status or failure indication.
   \item Evaluation results: time to first token, end-to-end response time,
   completed requests per second, prompt tokens processed on each model,
-  and agreement with the baseline output for the same selected model.
-  Results include the workload and configuration needed to reproduce them.
+  and comparison with the baseline for the same selected model. The
+  comparison reports generated-text agreement and output-score differences
+  under controlled settings. Results include the workload and configuration
+  needed to reproduce them.
 \end{itemize}
 
 \subsection{Stakeholders}
@@ -158,27 +163,23 @@ Section~\ref{sec:scope}, repeated runs, and reported variation. Improvements
 must exceed that variation.
 
 \begin{enumerate}[label=G\arabic*., ref=G\arabic*]
-  \item \textbf{Reduce delay from prefill after model switches.} Reduce
-  the time requests wait for conversation-history prefill when routing
-  selects a different model. Report prompt tokens processed, prediction
-  error, and work spent on prefill that is not used, by model pair and
-  context state.
-  \item \textbf{Reduce response delay.} Lower the median and 95th-percentile
-  time to first token: the time from submitting a request to receiving
-  its first generated token, including queueing and prefill after a model
-  switch.
-  \item \textbf{Increase serving capacity.} Complete more requests per
-  second on the same hardware with matched response lengths. Report
-  response delays alongside throughput.
+  \item \textbf{Reduce repeated prefill after model switches.} Reduce the
+  processing of shared conversation history when a request is routed to a
+  different model. Compare the chosen reuse approach with the serving
+  engine's native full-prefill path, and report time to first token,
+  repeated prompt tokens, and reuse or fallback outcomes.
+  \item \textbf{Increase serving capacity without unacceptable delay.}
+  Seek higher completed requests per second on the same hardware and matched
+  workloads, while reporting median and 95th-percentile time to first token
+  alongside throughput.
   \item \textbf{Preserve model behaviour and request independence.}
-  Match each selected model's baseline output scores within a documented
-  numerical tolerance under controlled settings, including multi-token
-  generation. Verify that changing one request's private instructions
-  leaves another request's output scores unchanged within that tolerance.
-  \item \textbf{Preserve ordinary serving.} Continue to handle requests
-  routed to the same model and requests without shared context. Pass the
-  baseline's functional checks and measure any added delay or loss of
-  throughput.
+  Compare generated text and output scores with the selected model's native
+  serving baseline under controlled settings, including multi-token
+  generation. Assess whether one request's private instructions affect
+  another request's output scores.
+  \item \textbf{Maintain ordinary serving.} Preserve the serving engine's
+  ability to handle same-model requests and requests without shared context,
+  and measure any effect of the integration on their delay and throughput.
 \end{enumerate}
 
 Evaluation will report improvements, regressions, and workloads with no
@@ -246,9 +247,9 @@ claims, and scope before submission.
   Finding a novel idea was harder than choosing the topic. With so much
   inference research underway, we struggled to tell whether an idea
   addressed an open problem. That uncertainty remains. We plan to review
-  existing work and measure the selected serving engine before committing
-  to an optimization. The proof of concept will test whether our proposed
-  contribution is needed.
+  existing work and measure the selected serving engine while testing the
+  feasibility of cross-model cache reuse. The evaluation can adjust the
+  reuse approach if feasibility work shows it is needed.
 
   \item \textbf{How did you and your team adjust the scope of your goals
   to ensure they are suitable for a Capstone project?}
@@ -257,10 +258,10 @@ claims, and scope before submission.
   if the gain was modest. The proposed scope turns that motivation into
   one workload we can measure: successive requests with shared conversation
   history that semantic routing sends to different models. Using existing
-  models lets us focus on serving-system design, correctness, and
+  models lets us focus on serving-system integration, correctness, and
   performance. Memory savings and broader model support remain stretch
   goals. This gives us a bounded implementation to evaluate within the
-  course, with success judged by reproducible gains.
+  course, with success judged by reproducible results.
 \end{enumerate}
 
 \end{document}
