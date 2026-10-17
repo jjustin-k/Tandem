@@ -20,4 +20,4 @@ src - Source code
 test - Test cases
 etc.
 
-The documentation for this project is updated on the project's [GitHub page](https://smiths.github.io/capTemplate/). <!-- update for your project!  -->
+The project documentation is published on [Tandem's GitHub Pages site](https://jjustin-k.github.io/Tandem/).
