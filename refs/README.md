@@ -11,3 +11,7 @@ be in the format AuthorYear.  If there is two author's the name should be
 Author1Author2Year.  For more than two authors, the name should be
 Author1EtAlYear.  In the preceding text, Author, Author1 and Author2 are the
 last names of the authors.
+
+## Research
+
+- [KV cache datasets and generation plan](research/KVCacheDataset.md) — findings and proposed paired-cache pilot for issue #21.
