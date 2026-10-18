@@ -27,7 +27,7 @@
 
 \begin{document}
 
-\title{Software Requirements Specification for \progname: Context Reuse for Semantically Routed Model Serving}
+\title{Software Requirements Specification for \progname: Reducing Repeated Work When Switching Language Models}
 \author{\authname}
 \date{\today}
 	
@@ -54,213 +54,324 @@ Oct 18, 2026 & 0.1 & Draft requirements for the current Tandem scope.\\
 
 ~\newpage
 \section{Purpose of the Project}
+
+
 \subsection{User Business}
-\textbf{Draft status.} This SRS proposes requirements for team and stakeholder
-review; it does not assert completed implementation or experiments. Model
-configurations, acceptance defaults and the technical schedule require review
-before the baseline is frozen. Open decisions are in Section~\ref{sec:open}.
-The current Problem Statement and Goals defines the scope. The Development
-Plan's earlier concurrent-agent mechanism requires reconciliation with that
-scope. Requirement identifiers and planned test families support traceability.
+Tandem is intended for people who build or run applications that use more
+than one large language model (LLM). For example, a customer-support chatbot might send
+simple questions to a smaller model and harder questions to a more capable
+model. Choosing a model based on the meaning or needs of a request is called
+\emph{semantic routing}. The application or an external router makes this choice.
 
-Applications can route successive conversation turns to different language
-models according to request needs. Their developers and operators need
-responsive generation while keeping the selected model's behaviour and
-requests independent. Reprocessing a long conversation when the selected
-model changes can delay the first output token and consume serving capacity.
-Tandem addresses the serving work associated with this transition. It is an
-extension and evaluation of an inference-serving system, used through a
-programmatic interface, with an initial deployment on one GPU-equipped server.
+Using a trained model to produce an answer is called \emph{inference}.
+During \emph{prefill}, the model processes the input prompt, including the
+conversation history. During \emph{decoding}, it generates the response one
+token at a time. When a conversation switches models, the newly selected
+model may need to repeat prefill for history that an earlier model has
+already processed. This adds response latency and uses GPU compute.
+
+Tandem aims to reduce this repeated prefill through \emph{cross-model
+key-value (KV) cache reuse}. A KV cache stores the key and value tensors
+produced by the model's attention layers for tokens already processed.
+These tensors let the model reuse attention state instead of calculating it
+again. Tandem will integrate a compatible cache prepared for the selected
+target model into the serving engine, then prefill the remaining prompt and
+continue decoding. A source model's KV cache is not assumed to work directly
+in a different model; the transfer method and model pair must pass the
+compatibility and output tests. If reuse is unavailable, the engine uses its
+\emph{native prefill} path, meaning its normal prompt processing.
+The initial project runs on one GPU-equipped server and is used by other
+software through an application programming interface (API).
+
+This SRS is a draft for team review. It describes required behaviour, not
+completed features or measured improvements. The team still needs to choose
+the model pair and cache-transfer method and approve the test settings listed
+in Section~\ref{sec:open}. The latest Problem Statement and Goals sets the
+scope; the Development Plan needs updating where it describes the earlier idea.
+
 \subsection{Goals of the Project}
-The goals below refine the current problem statement~\hyperref[src:PS]{[PS]}.
+Tandem aims to make applications that switch between language models cheaper
+and faster to run. Building on the model-switching scope in the problem
+statement~\hyperref[src:PS]{[PS]}, the project has four main goals:
 \begin{description}
-\item[G1: Reduce repeated prefill.] Avoid eligible repeated conversation-prefix
-processing after a model switch and reduce time to first token on a declared
-model-switch workload.
-\item[G2: Improve capacity.] Increase completed requests per second on matched
-hardware and workloads while controlling median and tail response delay.
-\item[G3: Preserve behaviour and isolation.] Maintain the selected model's
-required output agreement and prevent another request's private context from
-influencing a response through reuse.
-\item[G4: Maintain ordinary serving.] Retain native serving for same-model
-requests, requests without shared context, and requests whose cache cannot be used.
+\item[G1: Reuse prefill through a KV cache.] Use compatible cross-model KV
+cache reuse to preserve prefill work for the shared conversation prefix,
+the history at the start of the prompt. This lets the target model avoid
+prefilling that prefix again. Reuse is limited to supported model pairs with
+a KV cache prepared for the target model.
+\item[G2: Reduce inference compute and serving cost.] Avoid repeated prefill to
+reduce the GPU computation needed per completed request. Aim to lower the GPU
+time and cost needed to serve the same workload, counting the work needed to
+prepare, validate and transfer the KV cache.
+\item[G3: Make switching to cheaper models worthwhile.] Help an application
+benefit from using a lower-cost model when it is suitable for the task, without
+repeated processing of the conversation history using up those savings.
+Semantic routing selects the model; Tandem reduces the repeated prefill
+caused by the switch.
+\item[G4: Lower TTFT and increase throughput.] Reduce \emph{time to first
+token (TTFT)}, the wait before the selected model starts returning its answer.
+Use the saved computing capacity to increase \emph{throughput}, measured as
+completed requests per second on the same hardware, while keeping response
+latency within the agreed limits.
 \end{description}
-Goals are not claims of achieved speedup. The acceptance rules in the
-performance section determine which configurations satisfy them. Memory
-reduction and wider configuration coverage are stretch goals.
+For example, a chatbot could use a larger model for a difficult question and
+switch to a cheaper model for a simple follow-up. Tandem aims to reuse a
+compatible KV cache for the shared history so the cheaper model does not
+have to prefill it all again.
+
+Tests will compare the same requests and model choices with and without
+Tandem. They will report repeated prompt work, GPU time per completed request,
+TTFT, end-to-end latency and throughput. Estimated money savings must state the rates
+and assumptions used. Any separate savings attributed to choosing a cheaper
+model must identify the alternative model choices being compared.
+
+Correct output, privacy and normal processing when reuse is unavailable remain
+required conditions for achieving these goals. Supporting more models,
+handling more conversation branches and reducing peak GPU memory use are
+possible extensions after the core work succeeds.
+
 \section{Stakeholders}
+
+
 \subsection{Client}
-There is no contracted industry client in the supplied project plan.
-The target client role is an organization integrating routed language-model
-serving into an application. Its interests are predictable integration,
-correct responses and a measurable benefit over native serving. Course
-staff evaluate the capstone deliverables but do not replace product-user input.
+A potential client is a software company building a customer-support
+chatbot that uses several language models. Its development team wants the
+chatbot to respond quickly even when a conversation moves from one model
+to another. The company could help define useful requirements, such as which
+model combinations matter and how much delay users will accept.
+
+In this SRS, the \emph{client} is the organization whose application needs
+help guide Tandem's features. A university research lab developing a similar
+assistant is another potential client. These are examples of organizations
+that could benefit from the project; a current contract is not required.
+
 \subsection{Customer}
-The potential adopting customer is an infrastructure or application team
-that operates compatible model-serving software. The capstone release is an
-open-source research prototype, with no sales, billing or procurement workflow
-in scope. Adoption decisions depend on supported configurations, operational
-costs, correctness evidence and measured performance.
+A potential customer is an AI hosting provider that runs language models
+for other software teams. Another is a company's internal AI infrastructure
+team. Either could choose to install Tandem on its servers to reduce repeated
+processing and handle more requests with the GPUs it already has.
+
+Here, the \emph{customer} is the person or organization that would adopt and
+operate Tandem. The client and customer may be the same organization: a software
+company could both build the chatbot and run its model servers. Since Tandem
+is planned as an open-source project, adoption does not require buying a licence.
+
 \subsection{Other Stakeholders}
-Serving-engine maintainers need a bounded integration and regression evidence.
-Application end users experience response delay and any disclosure or output
-error, although they do not operate Tandem directly. Model and library
-providers impose distribution and use conditions. The team and course staff
-are project participants and evaluators; product needs are derived from the
-external roles above, with consultation evidence recorded separately.
+Other people who could benefit include:
+\begin{itemize}
+\item \textbf{Independent application developers:} could provide faster
+AI features without needing to build their own serving optimization.
+\item \textbf{Server operators:} could make better use of limited GPU capacity
+and see clear information about cache reuse and failures.
+\item \textbf{Serving-software maintainers:} could use the integration and its
+tests when improving how their software handles model switches.
+\item \textbf{Researchers:} could use the test tools and results to study
+when sharing cached calculations is useful and when it is unsafe or ineffective.
+\item \textbf{Application end users:} could receive answers sooner while
+keeping their conversations separate from other users' conversations.
+\end{itemize}
+The capstone team, TA and instructor review the project's work. Model and
+library providers also matter because their software and model licences set
+conditions on what can be used and shared.
+
 \subsection{Hands-On Users of the Project}
-Application developers submit requests and inspect responses through the
-serving interface. Operators select configurations, allocate GPU resources,
-enable or disable reuse and investigate failures. Evaluation developers run
-matched workloads and analyze results. These users are expected to understand
-Linux processes, configuration files and basic model-serving terminology.
+The people who directly use Tandem are application developers, server
+operators and researchers running tests. Developers send requests through the
+serving API and receive model responses. Operators choose the models and
+settings, turn cache reuse on or off, and investigate errors. Researchers run
+the same requests with and without Tandem and compare the results.
+
+These users are expected to know basic Linux commands and configuration files.
+People chatting with an application benefit indirectly and do not need to
+understand or operate Tandem.
+
 \subsection{Personas}
-These are analytical role descriptions, not interviewed individuals.
+The following example users describe different needs:
 \begin{description}
-\item[Application integrator.] Has an existing conversation service and router;
-needs to preserve request and response conventions while changing serving behaviour.
-\item[GPU operator.] Has a fixed memory budget and shared hardware access;
-needs explicit compatibility limits, bounded resource use and recoverable failure.
-\item[Serving maintainer.] Reviews engine changes; needs native-path regression
-tests, clear interfaces and reproducible examples of incorrect reuse.
+\item[Chatbot developer.] Is building a support assistant that switches
+between models. Needs faster responses without changing the conversation
+history, selected model or generation settings.
+\item[Server operator.] Runs models on a limited GPU budget. Needs to know
+which setups are supported, how much memory is available and what to do if
+cache reuse fails.
+\item[Serving-software maintainer.] Reviews changes to the serving engine.
+Needs clear code interfaces, repeatable tests and evidence that normal requests
+still work after the optimization is added.
 \end{description}
+
 \subsection{Priorities Assigned to Users}
-Output integrity and context isolation take priority over performance.
-Operators' ability to disable reuse and maintain native service takes priority
-over adding another model pair. Once these conditions hold, application
-integrators' latency needs and operators' throughput needs have equal weight:
-throughput improvements are assessed together with response delay.
+Keeping responses consistent with normal model processing and protecting
+private information come first. A speed improvement is not acceptable if it
+uses the wrong history or exposes another user's information.
+
+Next, operators must be able to turn off reuse and keep normal request
+processing available. After those needs are met, the project aims to reduce
+users' waiting time and increase the number of requests the server can finish.
+Both measures are reported so that improving one does not hide a problem with the other.
+
 \subsection{User Participation}
-Before freezing acceptance criteria, the team will seek feedback from at
-least one application-developer, operator or serving-maintainer proxy on the
-request contract, fallback outcomes and benchmark relevance. Actual dates,
-questions, statements and resulting requirement changes belong in
-Section~\ref{sec:elicitation}. No completed external consultation is evidenced
-by the supplied records; the personas and requirements are provisional until
-reviewed. Course and peer reviews provide additional technical feedback.
+Potential clients, customers and other users can review example requests,
+error messages and proposed tests. Their feedback can help the team choose
+realistic model combinations, useful performance goals and clear recovery
+instructions. A developer, operator or researcher can also review the project
+as a representative of these user groups.
 
-\par\medskip\noindent\textbf{Requirements elicitation evidence.}
+\par\medskip\noindent\textbf{Recording user feedback.}
 \label{sec:elicitation}
-The current documented sources are the Problem Statement and Goals, Development
-Plan and course checklist. These support the draft's scope and engineering
-contracts; they are not evidence of completed external stakeholder consultation.
-The analytical personas in the Stakeholders section are proposed review viewpoints.
+The stakeholder groups above are potential users, not a list of people already
+interviewed. No completed interviews are recorded in the supplied project files.
+For each future discussion, the team will record the date, participant's role,
+main feedback and the requirement IDs that changed because of it. The existing
+Problem Statement, Development Plan and course checklist provide the starting
+information for this draft. OI4 tracks the need to collect user feedback.
 
-OI4 remains open. Each actual consultation record will identify its date,
-participant role, questions, statements, resulting requirement IDs and the
-issue/minutes reference. External consultation records and stakeholder approval
-have not yet been supplied. A reviewer can trace every existing
-numbered requirement to a goal, rule or analytical role through its rationale
-and the traceability matrix; later consultation must supplement that provenance.
 \subsection{Maintenance Users and Service Technicians}
-Maintainers need source-level installation instructions, supported-version
-records, diagnostic outcomes and reproducible failing cases. Operators need
-configuration validation, workload summaries and recovery instructions.
-Physical GPU repair and cluster administration remain the hosting institution's
-responsibility; Tandem reports failures it can observe.
+Software maintainers need installation instructions, a list of supported
+versions and steps for repeating a reported problem. Server operators need
+clear error messages and instructions for returning to normal processing.
+The organization hosting the server remains responsible for repairing GPUs,
+maintaining the operating system and managing user access.
 
 \section{Mandated Constraints}
+
+
 \subsection{Solution Constraints}
-C1: The initial product serves text-generation workloads on one server.
-C2: Routing decisions are external inputs; Tandem does not select a different
-model to obtain a favourable result. C3: Base models are already trained.
-C4: Reuse is limited to exact rendered conversation-prefix matches and validated
-source/target configurations. C5: Native prefill remains available when reuse
-is not eligible. These constraints bound the project and protect the validity
-of the native-serving comparison~\hyperref[src:PS]{[PS]}.
+The initial project has these limits:
+\begin{description}
+\item[C1:] Run text-generation requests on one server.
+\item[C2:] Use the model selected by the application or router.
+\item[C3:] Use existing trained models; training the models is outside the project.
+\item[C4:] Reuse only an exact matching start of the conversation, using a
+model combination and cache-transfer method that have passed the required tests.
+\item[C5:] Keep the serving engine's normal prompt processing available
+whenever reuse is not possible.
+\end{description}
+These limits keep the project manageable and allow a fair comparison with the
+serving engine running without Tandem~\hyperref[src:PS]{[PS]}.
+
 \subsection{Implementation Environment of the Current System}
-The target is a Linux server with a supported GPU, driver/runtime stack and
-sufficient memory for the declared model set. The Development Plan proposes
-vLLM as the primary serving engine and SGLang as an alternative~\hyperref[src:DP]{[DP]}.
-The exact engine release, runtime, model revisions, precision and attention
-backend are recorded in a configuration manifest before any result is reported.
-CPU-sized checks support development; GPU measurements determine serving
-performance. No particular model pair is currently certified by this document.
+Tandem will run on a Linux server with a supported GPU and enough memory
+for the models being tested. The Development Plan proposes vLLM as the main
+serving engine, with SGLang as an alternative if needed~\hyperref[src:DP]{[DP]}.
+A serving engine is the software that loads models, schedules requests and
+produces their responses.
+
+Before testing, the team will record the exact engine, model, tokenizer,
+GPU software and calculation settings. This list is called the
+\emph{configuration record}. Small tests may run on a CPU during development,
+but GPU tests are needed to measure serving speed. The model pair for the
+first cache-reuse test has not yet been chosen.
+
 \subsection{Partner or Collaborative Applications}
-The adjacent application supplies conversation history, the latest user
-message, generation settings and the externally selected model. A trusted
-cache provider supplies candidate target-ready state and provenance through a
-local integration boundary. A workload driver supplies repeatable arrivals and
-routing decisions for evaluation. External authentication and the application's
-conversation persistence remain outside Tandem's boundary.
+The application supplies the conversation history, new user message,
+chosen model and response settings. A trusted cache provider supplies a
+candidate KV cache, meaning one being considered for reuse, with metadata
+identifying its source model, target model and conversation prefix.
+The provider prepares the KV cache for the target model using the chosen
+transfer method; Tandem validates compatibility before loading it.
+
+A separate test driver sends repeatable requests for performance testing.
+The application remains responsible for saving conversations and checking
+who its users are.
+
 \subsection{Off-the-Shelf Software}
-Candidate dependencies are the selected serving engine, Python, PyTorch,
-Hugging Face Transformers, model tokenizers and the GPU runtime described in
-the Development Plan. Existing model and tokenizer artifacts are reused.
-Versions and licences are recorded per release; no dependency's current
-version is implicitly guaranteed to be compatible. A new cache-prediction or
-model-training method is not a required deliverable.
+The project plans to reuse an existing serving engine, Python, PyTorch,
+Hugging Face Transformers, model tokenizers and the GPU software described in
+the Development Plan. Their versions and licences will be recorded with each
+release. An update to one of these dependencies may require new compatibility
+tests. The project does not require training a base model or inventing a new
+method for predicting one model's cache from another.
+
 \subsection{Anticipated Workplace Environment}
-Users develop locally and connect to a local or remote Linux server.
-The planned department GPU resources and access arrangements are described in
-the Development Plan. Reported benchmarks use a recorded hardware configuration
-and controlled competing load. Opportunistic GPU sessions may support
-exploration but are not substituted for a reproducible benchmark environment.
+Team members can develop on their own computers and connect to a Linux
+server for GPU work. The Development Plan describes the intended department
+GPU resources. Performance tests need a recorded hardware setup and a record
+of other work using the same GPU. Short experiments on an available GPU can
+help development, but final comparisons need repeatable conditions.
+
 \subsection{Schedule Constraints}
-The Development Plan records an October 19, 2026 SRS/Hazard Analysis milestone,
-a mid-to-late November PoC, a February Rev 0 demonstration, and a late-March
-final demonstration, followed by final documentation and EXPO activities.
-These are planning references, not independently verified current course dates.
-The scope-aligned phase-in plan in Section~\ref{sec:phases} replaces the earlier
-technical sequence for this draft; the team must reconcile it with course announcements.
+The Development Plan lists the SRS and Hazard Analysis for October 19, 2026,
+a proof-of-concept demonstration in November, an initial demonstration in
+February, and a final demonstration in late March. Final documentation and
+EXPO work follow. The team must check current course announcements for exact
+submission dates.
+
+Section~\ref{sec:phases} describes what should be completed at each stage.
+The technical tasks in the older Development Plan need updating to match the
+current focus on switching between models.
+
 \subsection{Budget Constraints}
-The initial scope assumes access to existing institutional GPU resources.
-No new hardware purchase, paid inference API or unrestricted cloud budget is
-a prerequisite. Actual quota, storage and GPU-time allowances have not been
-specified. An experiment that exceeds the available allocation is rescheduled
-or reduced with the changed workload disclosed; it is not reported as completed.
+The project plans to use existing university GPU resources rather than
+purchase new hardware or depend on paid model APIs. The available GPU time
+and storage allowance still need to be confirmed. If the available resources
+cannot run a planned test, the team will change or reschedule that test and
+record the reason.
+
 \subsection{Enterprise Constraints}
-The project is open source and follows the repository's review and
-issue-tracking workflow. Releases record source revisions and dependency
-conditions. Workload publication uses synthetic or appropriately permitted
-material. Institution credentials and private conversations are excluded from
-public repository artifacts.
+Project work is stored in the repository and reviewed through issues and
+pull requests. Shared test data must be public, synthetic or used with
+permission. Credentials and private conversations must stay out of public
+files. Each release records the code and dependency versions used.
 
 \section{Naming Conventions and Terminology}
+
+
 \subsection{Glossary of All Terms, Including Acronyms, Used by Stakeholders
 involved in the Project}
-\begin{longtable}{@{}p{0.22\textwidth}p{0.72\textwidth}@{}}
+\begin{longtable}{@{}p{0.25\textwidth}p{0.69\textwidth}@{}}
 \toprule Term & Meaning\\\midrule\endhead
-LLM & Large language model used to generate text.\\
-Semantic routing & External selection of a model based on a request's meaning or needs.\\
-Prefill & Processing prompt tokens to establish the state used for generation.\\
-Decode & Generating subsequent output tokens using the prompt and generated prefix.\\
-Token/tokenizer & An encoded text unit, and the versioned rules that produce such units.\\
-KV cache & Attention keys and values associated with processed token positions.\\
-Candidate cache & Supplied cache state being considered for a request; availability does not imply eligibility.\\
-Target-ready & State represented for a declared target model and configuration by a documented transfer method.\\
-Compatibility manifest & Versioned list of configurations allowed for reuse, with supporting validation evidence.\\
-Native path/baseline & Selected engine's ordinary serving path, retaining its existing prefix-cache features.\\
-Fallback & Abandoning an optional reuse attempt and processing from valid native state before output is emitted.\\
-Context prefix & Exact leading token sequence in the target-rendered conversation before the latest user turn.\\
-Reuse domain & Trusted application/session scope within which specified context may be shared.\\
-TTFT & Time to first emitted output token, measured from request arrival; undefined if no token is emitted.\\
-Latency/throughput & Elapsed response time, and completed requests per unit elapsed time.\\
-Logit & A model's output score before token selection; scores are compared at identical token prefixes.\\
-p50/p95 & Median and 95th percentile of the stated sample of measurements.\\
-GPU & Graphics processing unit executing supported model computations.\\
-V\&V & Verification and validation against specified criteria.\\
-PoC/Rev 0 & Proof-of-concept and first integrated demonstration milestones.\\
-FR/NFR/SR/DR & Functional, nonfunctional, safety/security and documentation requirement identifiers.\\
+LLM & Large language model: a model that can generate text.\\
+Inference & Running a trained model to produce an output, rather than training its parameters.\\
+Semantic routing & Choosing a model based on what a request needs. The application or router makes this choice.\\
+Serving engine & Software that loads models, schedules requests and returns their responses.\\
+Source/target model & The earlier model whose work is used to prepare a cache, and the model selected for the current request.\\
+Token/tokenizer & A token is a piece of text, such as a word or part of a word. A tokenizer converts text into these pieces.\\
+Prefill & The inference phase that processes the input prompt and computes attention state before response generation.\\
+Decoding & The inference phase that generates response tokens one at a time, using and extending the KV cache.\\
+Attention & The model mechanism that uses query, key and value tensors to combine information from tokens in the context.\\
+Tensor & A multidimensional array of numbers used to store model data and intermediate results.\\
+KV cache & Key-value cache: the key and value tensors stored by attention layers for processed tokens, so they need not be calculated again.\\
+Cross-model KV reuse & Reusing attention state across a source and target model through a tested transfer method. The cache must be prepared for the target model; ordinary caches are not automatically interchangeable.\\
+Prefix caching & Reusing a KV cache for an exact shared start of a prompt, avoiding repeated prefill for that prefix.\\
+Candidate cache & A cache being considered for reuse. It must pass the required checks before it is used.\\
+Target-ready cache & A cache prepared in the form required by the selected model. This alone does not prove that it is correct.\\
+Context prefix & The exact start of the conversation history shared by requests, expressed as tokens for the selected model.\\
+Native prefill & The serving engine's standard prompt-processing path when Tandem's cross-model cache reuse is not used. Existing prefix caching can still apply.\\
+Native processing / baseline & The serving engine running without Tandem's changes, including its existing cache features. This is the reference for output and performance comparisons.\\
+Fallback & Returning to normal processing when Tandem cannot safely use a cache.\\
+Compatibility manifest & The supported-setup list: records the model pairs, software versions and cache settings approved through testing.\\
+Profile / qualification & A profile describes one model/cache setup. Qualification means checking that setup against the required tests before enabling reuse.\\
+Reuse domain & An allowed sharing group, assigned by the host application, that controls which requests may share cached history.\\
+Cold/warm cache & A cold cache has no useful saved prefix. A warm cache already contains relevant calculations.\\
+TTFT & Time to first token: the wait from receiving a request to returning its first output token.\\
+Latency / throughput & Latency is a delay, such as TTFT or end-to-end time from request arrival to completion. Throughput is the number of successfully completed requests per second.\\
+p50 / p95 & The median and the 95th-percentile time. At p95, 95\% of the measured requests have a time at or below that value.\\
+Logit / greedy generation & A logit is a score the model assigns to a possible next token. Greedy generation chooses the highest-scoring token at each step.\\
+Confidence interval & A range used to describe uncertainty in a result across repeated tests.\\
+GPU / CPU & Graphics processing unit / central processing unit: processors used to run model calculations and other program work.\\
+API & Application programming interface: the way another program sends requests and receives results.\\
+V\&V / PoC / Rev 0 & Verification and validation / proof of concept / initial integrated demonstration.\\
+FR / NFR / SR / DR & Labels for functional, quality, safety/security and documentation requirements.\\
 \bottomrule
 \end{longtable}
-Data-field names use lower-case words with underscores. Identifiers are opaque
-strings; displayed model names do not replace artifact revision identifiers.
-Times are reported in milliseconds unless explicitly marked as seconds;
-throughput is requests per second, memory is bytes, and token counts are integers.
+Data fields use lower-case names with underscores. A request ID identifies one
+request; a model ID includes the model's exact version, not just its display
+name. Times use milliseconds unless stated otherwise. Throughput uses requests
+per second, memory uses bytes and token counts are whole numbers.
 
 \section{Relevant Facts And Assumptions}
+
+
 \subsection{Relevant Facts}
-F1: The current problem statement targets repeated prompt processing on
-model switches~\hyperref[src:PS]{[PS]}. F2: vLLM documents automatic prefix caching as reuse
-of already processed shared prefixes, with benefits directed at prefill rather
-than decode~\hyperref[src:APC]{[APC]}. F3: The target model, tokenizer, rendering, positions and
-numeric configuration are relevant to a reuse decision; eligibility must be
-established by this project's validation, not inferred from equal tensor shapes.
-F4: Reproducibility is conditional on controlled engine and hardware settings,
-as reflected in the engine's reproducibility guidance~\hyperref[src:REPRO]{[REPRO]}.
-No measured Tandem speedup or cross-model correctness result is available in
-the supplied project records.
+F1: Tandem's current goal is to reduce repeated prompt processing when a
+conversation switches models~\hyperref[src:PS]{[PS]}.
+F2: vLLM already supports reusing previously processed shared prompt prefixes;
+this reduces prefill work rather than the work of generating new tokens~\hyperref[src:APC]{[APC]}.
+F3: A cache must match the intended model, conversation and calculation settings.
+Having the same size is not enough to show it can be reused correctly.
+F4: Repeating model results requires controlled software and hardware settings~\hyperref[src:REPRO]{[REPRO]}.
+The supplied project files do not yet contain measured Tandem performance or
+proof that a chosen cross-model cache works.
 
 \par\medskip\noindent\textbf{Reference sources.}
 \begin{description}
@@ -280,953 +391,1067 @@ Accessed October 18, 2026.
 Accessed October 18, 2026. The release manifest records the guidance applicable
 to the engine version actually evaluated.
 \end{description}
-\subsection{Business Rules}
-BR1: The selected model is authoritative for a request. BR2: Reuse is an
-optional optimization; absence of eligible context does not make an otherwise
-valid request invalid. BR3: Confidential context is shared only within its
-permitted reuse domain. BR4: Successful generation and evaluation retain
-request identity. BR5: A performance result is accepted only together with
-its configuration, workload and correctness evidence. BR6: An unsupported
-configuration is never silently promoted to supported status.
-\subsection{Assumptions}
-A1: Operators control the server configuration and model artifacts; the initial
-cache-provider interface is within that trusted environment. Public upload of
-arbitrary serialized cache objects is excluded. A2: The application supplies
-accurate history and routing decisions; Tandem still validates structure and
-supported limits. A3: Hardware can run at least the native workloads selected
-for evaluation; resource shortage remains an explicit failure case.
-A4: A suitable transfer approach and at least one useful model combination can
-be identified; this is a feasibility hypothesis, not an established fact.
-A5: Suitable public or synthetic evaluation contexts can be obtained.
-A6: The team can control or record competing GPU load. Failed assumptions
-require an open issue, revised acceptance scope and documented review; they do
-not justify an unreported change of baseline.
 
-\par\medskip\noindent\textbf{Proposed configuration and evaluation constants.}
+\subsection{Business Rules}
+BR1: Tandem uses the model chosen by the application.
+BR2: A valid request can still run normally when no cache can be reused.
+BR3: Cached private information is shared only with requests allowed to use it.
+BR4: Responses, errors and measurements keep the correct request ID.
+BR5: A performance claim includes the test requests, settings and output checks
+needed to assess it.
+BR6: A model/cache setup is listed as supported only after it passes the required tests.
+
+\subsection{Assumptions}
+A1: The server operator controls the model files and settings. The initial
+cache provider runs in this trusted environment; users cannot upload arbitrary
+cache files directly.
+A2: The application supplies the intended history and model choice. Tandem still
+checks that the request is well formed and within supported limits.
+A3: The available server can run the selected models normally. Tests still cover
+what happens when memory runs out.
+A4: The team can find at least one useful model pair and cache-transfer method.
+This is a question for the proof of concept, not an established result.
+A5: Public or synthetic text is available for repeatable tests.
+A6: The team can control or record other work using the GPU during testing.
+If an assumption is wrong, the team will review the affected requirements and
+record any change to the test plan.
+
+\par\medskip\noindent\textbf{Proposed test settings and limits.}
 \label{sec:constants}
-These values are proposed requirements/evaluation defaults for review, not
-measurements or claims already agreed by stakeholders. Changes are approved and
-recorded before acceptance experiments; thresholds are never adjusted after
-seeing reuse results merely to produce a pass. Model-specific token, concurrency
-and memory limits are concrete values in the frozen configuration manifest.
+The table gives starting values for team review, not measured results.
+The team will approve them before the final tests and explain any change.
+Values must not be changed after a failed test just to make it pass.
+Limits that depend on the model or GPU will be recorded with the tested setup.
 \begin{longtable}{@{}p{0.27\textwidth}p{0.17\textwidth}p{0.50\textwidth}@{}}
 \toprule Symbol & Draft value & Meaning and rationale\\\midrule\endhead
-\texttt{SCORE\_ATOL} & $10^{-3}$ & Absolute tolerance in dimensionless finite-logit comparisons; a strict initial engineering proposal subject to native-repeatability validation (OI3).\\
-\texttt{SCORE\_RTOL} & $10^{-3}$ & Relative logit tolerance; scales the allowance with score magnitude without replacing greedy agreement (OI3).\\
-\texttt{CHECK\_TOKENS} & 32 tokens & Multi-token correctness horizon, or shared earlier stop; catches failures not visible at the next token alone.\\
-\texttt{REGRESSION\_LIMIT} & 0.05 & Five-percent proposed budget for ordinary-path overhead and tail-delay degradation; requires stakeholder approval (OI3).\\
-\texttt{PAIRED\_RUNS} & 10 pairs & Initial independent repetition count; increase if uncertainty prevents a conclusion.\\
-\texttt{WARMUP\_RUNS} & 3 runs & Untimed initial warm-ups per condition; their work and cache policy are recorded.\\
-\texttt{CONFIDENCE} & 0.95 & Coverage level for paired-trial uncertainty intervals.\\
-\texttt{BOOTSTRAP\_DRAWS} & 2000 draws & Reproducible paired resampling count with recorded seed.\\
-\texttt{TAIL\_PERCENTILE} & 95 & Tail-latency percentile denoted p95 in this document.\\
-\texttt{PROMPT\_GRID} & $\{256,1024,4096\}$ tokens & Initial target-token prompt-length cells; exact contexts and feasible cells are fixed in the workload manifest.\\
-\texttt{CONCURRENCY\_GRID} & $\{1,2,4,8\}$ & Initial simultaneous-request cells; supported limits and skipped cells are explicit.\\
-\texttt{MAX\_OUTPUT} & 64 tokens & Initial benchmark generation cap, bounded further by the selected model/configuration.\\
-\texttt{REQUEST\_TIMEOUT} & 120 seconds & Configurable prototype deadline for a bounded request lifetime; not a response-time promise.\\
-\texttt{RECOVERY\_LIMIT} & 1 restart & Maximum automatic native recovery before output; bounds retries.\\
-\texttt{LIFECYCLE\_CYCLES} & 100 cycles & Initial repeated termination/ownership stress check; not a proof against all leaks.\\
+\texttt{SCORE\_ATOL} & $10^{-3}$ & Maximum starting allowance for a small difference between corresponding model scores; the team must check whether normal repeated runs can meet it (OI3).\\
+\texttt{SCORE\_RTOL} & $10^{-3}$ & Additional score allowance proportional to the size of the reference score; generated tokens must also match in the specified tests (OI3).\\
+\texttt{CHECK\_TOKENS} & 32 tokens & Number of generated tokens checked, unless both runs stop sooner; checks more than just the next token.\\
+\texttt{REGRESSION\_LIMIT} & 0.05 & Proposed maximum slowdown for normal requests and p95 delay; requires review with potential users (OI3).\\
+\texttt{PAIRED\_RUNS} & 10 pairs & Starting number of paired runs with and without Tandem; run more if the results are too uncertain.\\
+\texttt{WARMUP\_RUNS} & 3 runs & Practice runs before timing begins; record how these runs prepare the caches.\\
+\texttt{CONFIDENCE} & 0.95 & Level used when calculating the uncertainty range for the paired results.\\
+\texttt{BOOTSTRAP\_DRAWS} & 2000 draws & Number of times complete paired trials are resampled to estimate uncertainty; record the random seed.\\
+\texttt{TAIL\_PERCENTILE} & 95 & Percentile used to describe requests with longer waiting times.\\
+\texttt{PROMPT\_GRID} & $\{256,1024,4096\}$ tokens & Starting prompt lengths for testing; record the exact text and skip lengths the model cannot support.\\
+\texttt{CONCURRENCY\_GRID} & $\{1,2,4,8\}$ & Starting numbers of simultaneous requests; record which levels the server can support.\\
+\texttt{MAX\_OUTPUT} & 64 tokens & Maximum generated tokens per request in the starting test setup; the model limit can reduce it.\\
+\texttt{REQUEST\_TIMEOUT} & 120 seconds & Default time limit for a request. This prevents unlimited waiting; it is not a promised response time.\\
+\texttt{RECOVERY\_LIMIT} & 1 restart & Maximum automatic restart through normal processing, allowed only before any output has been returned.\\
+\texttt{LIFECYCLE\_CYCLES} & 100 cycles & Number of repeated completion, failure and cancellation checks used to look for memory that was not released.\\
 \bottomrule
 \end{longtable}
 
 \section{The Scope of the Work}
+
+
 \subsection{The Current Situation}
-An application retains a conversation and supplies it on later requests.
-An external router may change the selected model between turns. A newly
-selected model can require prompt processing despite useful work having been
-performed for an earlier model. Existing native prefix reuse remains part of
-the baseline. Tandem investigates whether a validated target-ready cache can
-be integrated to reduce repeated processing without changing request semantics.
+A conversation application saves the history and includes it with later
+requests. If it chooses a different model for the next turn, that model may
+need to process the history again. The serving engine may already have useful
+prefix-cache features, and those features stay enabled in the comparison.
+Tandem investigates whether a cache prepared for the new model can reduce
+additional repeated work while preserving its response.
+
 \subsection{The Context of the Work}
 \begin{tabularx}{\textwidth}{@{}lX@{}}
-\toprule External participant & Exchanges across the Tandem boundary\\\midrule
-Application/router & Request identity, rendered conversation inputs, selected model and settings; receives tokens and terminal status.\\
-Trusted cache provider & Candidate state, source/target revisions, prefix identity, format, readiness and sharing metadata.\\
-Operator & Configuration, supported profiles and resource limits; receives diagnostics.\\
-Evaluation driver & Workload and arrival trace; receives per-request and aggregate records.\\
+\toprule Outside system or user & Information exchanged with Tandem\\\midrule
+Application/router & Sends the request ID, history, new message, selected model and settings. Receives output tokens and completion or error status.\\
+Cache provider & Supplies a possible cache and details about its models, history, format, readiness and sharing permissions.\\
+Server operator & Supplies supported settings and resource limits. Receives status information and error messages.\\
+Test driver & Sends repeatable requests at recorded times. Receives individual and summary measurements.\\
 \bottomrule
 \end{tabularx}
-Tandem's serving boundary covers admission, cache eligibility and placement,
-native prefill or reused-prefix continuation, generation and status reporting.
-The evaluation boundary additionally covers matched replay and result comparison.
-The router and the creation of a new cache-prediction algorithm are external.
+Inside Tandem's scope are request validation, KV cache compatibility checks,
+loading an accepted KV cache, prefilling the remaining prompt, decoding,
+native-prefill fallback and result reporting. The
+test tools also compare runs with and without Tandem. Selecting the model and
+inventing a new cache-prediction method remain outside the project.
+
 \subsection{Work Partitioning}
-BE1: On request arrival, validate the request and associate a selected-model
-execution. BE2: On candidate availability, decide eligibility and use a valid
-prefix or native prefill. BE3: On token production, return output under the
-request identity. BE4: On cancellation, timeout or resource failure, terminate
-with a classified outcome and release request-owned resources. BE5: On an
-evaluation invocation, execute matched configurations and produce a reproducible
-comparison. BE6: On configuration change, validate the new configuration and
-invalidate state that no longer belongs to it.
+BE1: A request arrives. Check its inputs and find the selected model.
+BE2: A possible cache is available. Check it, then reuse it or process the
+prompt normally.
+BE3: The model produces a token. Return it with the correct request ID.
+BE4: A request finishes, fails, times out or is cancelled. Report its final
+status and release memory that no active request still needs.
+BE5: A test run starts. Send the same requests with and without Tandem and
+record the comparison.
+BE6: A configuration changes. Check the new settings and stop using cached
+state that no longer matches them.
+
 \subsection{Specifying a Business Use Case (BUC)}
-BUC1: Serve a routed conversation turn. Trigger: the application has a new
-message and a routing decision. Preconditions: its selected model is available
-under a valid serving configuration. Main outcome: the application receives
-the selected model's response with correct request identity. Alternative:
-context cannot be reused, so normal prompt processing supplies the response.
-Failure outcome: invalid input is rejected or a serving failure is reported;
-partially invalid cache state is not presented as successful work.
-BUC2: Assess an integration configuration. Trigger: an operator requests
-qualification. Outcome: a report records correctness, latency, throughput,
-resource observations and limitations against a matched native baseline.
+\textbf{BUC1: Answer the next conversation message.} The application has a
+new message and has chosen a model. If a compatible cache is available,
+Tandem uses it to avoid repeating work on the history. Otherwise, the model
+processes the prompt normally. The application receives the response under
+the same request ID. Invalid inputs are rejected clearly, and a failure during
+processing is reported rather than presented as a successful answer.
+
+\textbf{BUC2: Check whether a setup benefits from Tandem.} An operator or
+researcher runs a fixed set of requests with and without the changes. The
+report compares output consistency, response times, completed requests,
+resource use and failures. It states which models and settings were tested.
 
 \section{Business Data Model and Data Dictionary}
+
+
 \subsection{Business Data Model}
-A run references one configuration manifest and a workload. A workload
-contains ordered request arrivals. Each request references one selected model
-revision, one reuse domain and zero or more candidate cache descriptors.
-A candidate records its source/target provenance and the exact prefix for
-which it is valid. Each admitted request has output events and exactly one
-terminal outcome. Per-request measurements reference both the request and run;
-aggregate results reference the contributing request records. A native request
-and its Tandem counterpart share a logical workload key, not necessarily an
-in-memory execution object. Conversation storage remains application-owned.
+A test run has a configuration record and a list of requests with arrival
+times. Each request has a unique ID, a selected model, an allowed sharing group
+and possibly one or more caches to consider. Each cache records where it came
+from, which model it is prepared for and which history it represents.
+
+Output events and measurements refer back to the request ID. Each accepted
+request has one final result: completed, failed or cancelled. Rejected requests
+are recorded separately. Comparisons match the same logical request across
+the normal run and the Tandem run. The application, not Tandem, stores the
+long-term conversation history.
+
 \subsection{Data Dictionary}
 \begin{longtable}{@{}p{0.20\textwidth}p{0.25\textwidth}p{0.49\textwidth}@{}}
-\toprule Entity/field & Type and constraints & Meaning\\\midrule\endhead
-\texttt{run\_id} & Nonempty string & Distinguishes experimental repetitions and joins records.\\
-\texttt{request\_id} & Nonempty, unique per run & Correlates admission, tokens, status and measurements.\\
-\texttt{history} & Ordered role/content messages & Complete context including system instructions; no semantic paraphrasing for reuse matching.\\
-\texttt{latest\_message} & Text or role/content message & New turn, appended using the selected model's recorded rendering rules.\\
-\texttt{model\_id} & Registered artifact and revision & Externally selected target; unknown IDs are rejected.\\
-\texttt{settings} & Validated generation controls & Output limit, sampling parameters, stopping rules and optional seed; defaults are recorded.\\
-\texttt{reuse\_domain} & Trusted nonempty identifier & Assigned by hosting integration; not granted merely because a request claims it.\\
-\texttt{candidate} & Optional opaque state handle & Cache descriptor plus trusted local access to declared target-ready state.\\
-\texttt{cache\_metadata} & Structured record & Source/target revisions, transfer method/version, tokenizer/template revisions, prefix tokens, positions, layout, precision, domain, state and configuration epoch.\\
-\texttt{configuration} & Versioned manifest & Engine/runtime/hardware, models, allowed transfers, resource limits and reuse toggle.\\
-\texttt{output\_event} & Request ID, sequence index, token/text & Ordered output associated with one execution; emitted token content remains private to the request.\\
-\texttt{status} & Enumerated outcome & Rejected, completed, failed or cancelled; a failed/cancelled stream may include previously emitted tokens.\\
-\texttt{reason} & Stable diagnostic code & Invalid input, unknown model, mismatch, unsupported transfer, incomplete cache, memory shortage, timeout, cancellation or engine failure.\\
-\texttt{measurement} & Numeric value with unit or null/reason & Arrival, first-token and finish times; TTFT, total latency, completion status, actual computed/reused prompt tokens and memory observations where available.\\
-\texttt{comparison} & Paired run statistics & Workload keys, metrics, uncertainty intervals and correctness differences, including failed requests.\\
+\toprule Field & Allowed value & Purpose\\\midrule\endhead
+\texttt{run\_id} & Nonempty text & Identifies one test run and its records.\\
+\texttt{request\_id} & Nonempty text, unique within the run & Connects a request to its output, final status and measurements.\\
+\texttt{history} & Messages in their original order & Includes the conversation and system instructions already provided.\\
+\texttt{latest\_message} & Text or a message with a role & The new turn, added using the selected model's conversation format.\\
+\texttt{model\_id} & Known model name and exact version & Records the application's selected model. Unknown models are rejected.\\
+\texttt{settings} & Supported response controls & Includes output length, sampling settings, stop rules and an optional random seed. Applied defaults are recorded.\\
+\texttt{reuse\_domain} & Sharing-group ID assigned by the host & Determines which requests may share specified history. A request cannot grant itself permission merely by naming a group.\\
+\texttt{candidate} & Optional reference to a cache & Lets the trusted local provider supply cache data for checking. A missing cache is allowed.\\
+\texttt{cache\_metadata} & Details describing the cache & Includes source/target model versions, transfer method, tokenizer and conversation-format versions, covered tokens and positions, data format, precision, sharing group, readiness and configuration version.\\
+\texttt{configuration} & Versioned settings record & Describes the server software, hardware, models, approved transfer setups, limits and reuse on/off setting.\\
+\texttt{output\_event} & Request ID, output order and token/text & Returns each piece of the response to the correct request.\\
+\texttt{status} & Rejected, completed, failed or cancelled & Shows the result. A failed or cancelled request may already have returned some output.\\
+\texttt{reason} & Defined status or error code & Explains a rejected request, unused cache, timeout, cancellation, memory shortage or engine failure.\\
+\texttt{measurement} & A number with units, or no value with a reason & Records timings, computed/reused prompt tokens, status and directly observed memory use where available.\\
+\texttt{comparison} & Results for matching runs & Reports speed, throughput, uncertainty, output differences and failures.\\
 \bottomrule
 \end{longtable}
-A valid tokenized prompt fits the target's context limit after reserving the
-configured output allowance. Output limits are positive and bounded by that
-configuration. Unsupported generation controls produce a validation error
-rather than being silently ignored. A missing candidate is valid. An unusable
-optional candidate has a native-path outcome unless the request or engine itself
-cannot be served. Raw conversation or cache contents are excluded from normal
-measurement records.
+The input and requested output must fit within the selected model's context
+limit and the server's configured limits. The output-token limit must be
+positive. Unsupported response controls are rejected rather than ignored.
+An unusable optional cache normally leads to standard prompt processing;
+invalid requests or server failures can still prevent a response. Normal logs
+and measurement files do not include the raw conversation or cache contents.
 
 \section{The Scope of the Product}
+
+
 \subsection{Product Boundary}
-Core scope covers text generation, exact context-prefix identification,
-validated cache integration, request isolation, native fallback and reproducible
-evaluation on one server. Models, routing decisions and candidate state are
-supplied. The baseline retains native prefix caching. Exclusions are base-model
-training, a new cache-prediction method, router development, retrieval, agent
-orchestration, a graphical application, multi-server operation and semantic
-matching of differently worded context. Support is defined by a versioned
-manifest, not by every model loadable by the underlying engine.
+Tandem covers text generation, exact checks for shared conversation history,
+use of tested caches, separation of requests, return to normal processing and
+repeatable evaluation on one server. The application supplies the models,
+routing decisions and conversation. A trusted provider supplies possible caches.
+The baseline keeps the serving engine's existing prefix-cache features.
+
+The project does not include training base models, inventing a new cache
+predictor, building the router, retrieving documents, coordinating agents,
+building a graphical application or running across several servers. Similar
+meaning is not enough for reuse: the covered start of the tokenized history
+must match exactly. Supported models and settings are listed explicitly.
+
 \subsection{Product Use Case Table}
 \begin{longtable}{@{}p{0.12\textwidth}p{0.25\textwidth}p{0.57\textwidth}@{}}
-\toprule ID & Actor/trigger & Required outcome\\\midrule\endhead
-PUC1 & Application submits a valid routed turn & Reuse an eligible prefix and generate with the selected model.\\
-PUC2 & Candidate is absent or ineligible & Use native prefill with a recorded reuse outcome.\\
-PUC3 & Reuse attempt fails & Recover before output where possible; otherwise report failure.\\
-PUC4 & Operator configures serving & Accept a valid configuration; reject unsupported or inconsistent settings.\\
-PUC5 & Evaluator invokes a workload & Run paired native/Tandem conditions and produce traceable results.\\
-PUC6 & Client cancels or execution times out & Finish with a terminal outcome and release owned resources.\\
+\toprule ID & What happens & Required result\\\midrule\endhead
+PUC1 & A valid request has a usable cache & Reuse the matching history and generate with the chosen model.\\
+PUC2 & A cache is missing or fails a check & Process the prompt normally and record why reuse was not used.\\
+PUC3 & Reuse fails during processing & Restart safely before output where possible; otherwise report the failure.\\
+PUC4 & An operator changes settings & Accept supported settings and reject inconsistent or unsupported ones.\\
+PUC5 & A researcher starts a comparison & Run matching requests with and without Tandem and produce a repeatable report.\\
+PUC6 & A request is cancelled or times out & Report its final status and release memory no active request needs.\\
 \bottomrule
 \end{longtable}
+
 \subsection{Individual Product Use Cases (PUC's)}
-PUC1 begins with a valid request, available target model and ready candidate.
-The system identifies the target-rendered history prefix, checks the manifest,
-context and permission conditions, establishes valid target state, processes
-uncached prompt tokens, and returns ordered output plus completion status.
-Postcondition: the output and all measurements retain the original request ID.
+\textbf{PUC1: Reuse available history.} Check the request and selected model.
+Compare the possible cache with the exact history, model setup and sharing
+permissions. If every check passes and memory is available, load the cache,
+process the remaining prompt and return output in order with the request ID.
 
-PUC2 has the same valid-request precondition but lacks eligible reuse. The system
-records the reason and follows the target model's native serving path. This is
-normal operation, not a rejected request. Same-model requests retain native
-prefix-cache behaviour.
+\textbf{PUC2: Process without reuse.} If no cache is available or a check
+fails, record the reason and use the selected model's normal processing.
+This is expected behaviour, not a rejection of an otherwise valid request.
+Normal same-model prefix caching remains available.
 
-PUC3 starts after a reuse attempt fails. Before the first output event, the
-system discards invalid state and may perform a bounded native recovery. After
-output has begun, it reports a failed stream and never concatenates a new native
-answer onto it. The original failure and recovery outcome remain visible.
+\textbf{PUC3: Handle a reuse failure.} If no output has been returned,
+discard invalid state and attempt a limited restart through normal processing.
+If output has already started, end the response with a failure status. Do not
+append a newly restarted answer to the partial answer.
 
-PUC4 validates the complete configuration before admitting dependent work.
-Unsupported transfer entries stay disabled. A configuration change cannot make
-old-version state eligible. PUC5 freezes manifests and workloads, checks
-correctness and native repeatability, runs paired trials, and reports both
-successes and failures. A failed correctness check prevents qualification.
-PUC6 records a cancellation or timeout terminal event and removes the request's
-claim on reusable state without invalidating another active request's state.
+\textbf{PUC4: Change the setup.} Check the new configuration before using it
+for new requests. Keep untested model/cache combinations disabled. Do not reuse
+old state when its model or configuration version no longer matches.
+
+\textbf{PUC5: Compare performance.} Record the settings and test requests,
+check output consistency, then run repeated paired comparisons. Include failed
+requests in the report. A setup that fails output checks is not approved for reuse.
+
+\textbf{PUC6: Stop a request.} Record cancellation or timeout and release
+the request's claim on memory. Keep any shared state still needed by another
+active request intact.
 
 \section{Functional Requirements}
+
+
 \subsection{Functional Requirements}
 \label{sec:functional}
-All functional requirements below are core unless explicitly identified as evaluation requirements. They specify externally testable obligations of the serving or evaluation boundary.
-
+These requirements describe what Tandem and its test tools must do. ``Shall''
+marks a required behaviour. The \emph{fit criterion} explains how that
+requirement will be checked. The source and rationale explain why it is needed.
+Names beginning with T- identify planned tests, not tests already completed.
 
 \par\medskip\noindent\phantomsection\label{req:FR-01}
-\textbf{FR-01 --- Validate requests}\par
-Tandem shall validate each request against the data dictionary before admission.\par
-\textbf{Fit criterion.} T-ADM submits missing fields, unknown models, invalid controls, duplicate run/request identifiers and over-limit prompts; each receives a specific rejection and starts no generation. Valid requests with absent candidate state remain admissible.\par
-\textbf{Source and rationale.} BR1, BR2; input errors must be distinguishable from reuse misses.
+\textbf{FR-01 --- Check requests before processing}\par
+Tandem shall check each request against the Data Dictionary before accepting it.\par
+\textbf{Fit criterion.} T-ADM sends missing fields, unknown models, invalid settings, repeated request IDs and prompts that exceed the limits. Each is rejected with a clear reason before generation begins. A valid request without a cache is accepted.\par
+\textbf{Source and rationale.} BR1, BR2; a bad request and an unavailable cache are different situations.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-02}
-\textbf{FR-02 --- Preserve selected-model semantics}\par
-Tandem shall execute an admitted request with its externally selected model revision, complete ordered prompt and validated generation settings.\par
-\textbf{Fit criterion.} T-SEM verifies model revision, rendering and effective settings against the matched native request; no history or private instruction is omitted.\par
-\textbf{Source and rationale.} G3; routing and conversation semantics belong to the application.
+\textbf{FR-02 --- Use the requested model and inputs}\par
+Tandem shall use the application's selected model version, complete ordered prompt and accepted response settings.\par
+\textbf{Fit criterion.} T-SEM compares the model version, formatted prompt and applied settings with the same request run normally. No history or instruction is left out.\par
+\textbf{Source and rationale.} BR1; an optimization must not change what the application asked the model to do.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-03}
-\textbf{FR-03 --- Identify shared context}\par
-Tandem shall identify reusable context only as an exact leading token prefix of the target-rendered conversation history.\par
-\textbf{Fit criterion.} T-MATCH changes one message, order, system instruction, tokenizer/template revision or position; each mismatch rejects the affected candidate prefix. The new user turn is processed as uncached input.\par
-\textbf{Source and rationale.} C4; matching meaning or tensor dimensions alone does not establish identity.
+\textbf{FR-03 --- Match the shared history exactly}\par
+Tandem shall reuse only an exact matching start of the history after formatting and tokenizing it for the selected model.\par
+\textbf{Fit criterion.} T-MATCH changes a message, message order, system instruction, tokenizer or conversation-format version, or token position. Each relevant mismatch prevents that cache from being used. The latest user turn is still processed as new input.\par
+\textbf{Source and rationale.} C4; similar meaning or equal cache sizes do not establish an exact match.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-04}
-\textbf{FR-04 --- Validate candidate eligibility}\par
-Tandem shall permit a candidate only when every eligibility condition in Section~\ref{sec:formal} holds.\par
-\textbf{Fit criterion.} T-COMP exercises each false predicate independently and the valid case; no false or unknown predicate permits reuse. A ready, supported, permitted, matching candidate with resources reaches the reuse path.\par
-\textbf{Source and rationale.} G1, G3; optional state needs an explicit trust and compatibility boundary.
+\textbf{FR-04 --- Validate a KV cache before reuse}\par
+Tandem shall use a candidate KV cache only when all compatibility, prefix-matching, permission, readiness and resource checks in Section~\ref{sec:formal} pass.\par
+\textbf{Fit criterion.} T-COMP makes each check fail separately, then tests a valid case. A failed or unknown check prevents reuse. A ready, tested, permitted, matching cache with available resources can be used.\par
+\textbf{Source and rationale.} G1, C4, BR3, BR6; the cache must be suitable for this request, not merely available.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-05}
-\textbf{FR-05 --- Integrate eligible state}\par
-Tandem shall make accepted target-ready prefix state available to the selected model and process the remaining prompt exactly once in its logical token order.\par
-\textbf{Fit criterion.} T-REUSE checks prefix coverage, suffix positions and actual target-model prompt work for a qualified case; outputs meet \hyperref[req:NFR-05]{\texttt{NFR-05}}.\par
-\textbf{Source and rationale.} G1; this is serving integration, not a requirement to invent a transfer algorithm.
+\textbf{FR-05 --- Load the KV cache and prefill the remaining prompt}\par
+Tandem shall load an accepted KV cache into the serving engine for the selected target model, prefill the remaining prompt once in its original order, and continue decoding from that state.\par
+\textbf{Fit criterion.} T-REUSE checks the cached history, remaining-token positions and measured prompt work for a tested setup. Output checks meet \hyperref[req:NFR-05]{\texttt{NFR-05}}.\par
+\textbf{Source and rationale.} G1; the work is to integrate compatible cross-model KV cache reuse into the serving engine.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-06}
-\textbf{FR-06 --- Maintain native operation}\par
-Tandem shall use the native path when reuse is disabled, unavailable or ineligible while retaining the engine's existing prefix-cache features.\par
-\textbf{Fit criterion.} T-NATIVE covers same-model, no-shared-context, missing-state and unsupported-pair workloads; selected model and outputs meet the native contract.\par
-\textbf{Source and rationale.} G4, BR2; inability to optimize must not itself reject valid requests.
+\textbf{FR-06 --- Keep normal processing available}\par
+Tandem shall use normal model processing when reuse is off, unavailable or unsuitable, while keeping the engine's existing prefix-cache features.\par
+\textbf{Fit criterion.} T-NATIVE checks same-model requests, requests without shared history, missing caches and unsupported model pairs. They still use the correct model and meet the normal output rules.\par
+\textbf{Source and rationale.} C5, BR2; a valid request must not fail solely because Tandem cannot speed it up.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-07}
-\textbf{FR-07 --- Recover or report reuse failure}\par
-Tandem shall follow the bounded recovery and failure rules in Section~\ref{sec:formal} when an attempted reuse fails.\par
-\textbf{Fit criterion.} T-FAIL injects load and placement failures before and after the first output event; recovery starts from valid native state at most \texttt{RECOVERY\_LIMIT} times, or returns an explicit failure.\par
-\textbf{Source and rationale.} G3, G4; repeated retries or mixed streams conceal failures.
+\textbf{FR-07 --- Recover from or report a reuse failure}\par
+Tandem shall follow the restart and failure rules in Section~\ref{sec:formal} if a cache-reuse attempt fails.\par
+\textbf{Fit criterion.} T-FAIL forces cache-loading failures before and after output begins. Before output, a restart uses valid normal-processing state at most \texttt{RECOVERY\_LIMIT} times. Otherwise, a failure is reported.\par
+\textbf{Source and rationale.} BR2, BR4; repeated retries or mixing two answers would hide what happened.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-08}
-\textbf{FR-08 --- Correlate output and outcomes}\par
-Tandem shall associate ordered output events and exactly one terminal outcome with each admitted request identity.\par
-\textbf{Fit criterion.} T-STATE interleaves, cancels and fails requests; sequence indices remain ordered and each admitted identity has one completed, failed or cancelled outcome. Rejections remain separate admission records.\par
-\textbf{Source and rationale.} BR4; concurrency and fallback must not duplicate or misattribute responses.
+\textbf{FR-08 --- Keep output attached to the right request}\par
+Tandem shall return output in order with the correct request ID and record exactly one final status for each accepted request.\par
+\textbf{Fit criterion.} T-STATE runs overlapping requests, cancellations and failures. Output order remains correct, and each accepted request ends as completed, failed or cancelled. Rejected requests have separate records.\par
+\textbf{Source and rationale.} BR4; simultaneous requests and restarts must not duplicate or mix responses.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-09}
-\textbf{FR-09 --- Release request-owned resources}\par
-Tandem shall release a finished, failed or cancelled request's resource ownership while preserving state still owned by another active request.\par
-\textbf{Fit criterion.} T-LIFE repeats all termination paths for \texttt{LIFECYCLE\_CYCLES}; the engine reports no residual request-owned allocation and active sibling requests remain correct.\par
-\textbf{Source and rationale.} G3, G4; native reusable-cache retention is distinguished from leaked request ownership.
+\textbf{FR-09 --- Release memory when a request ends}\par
+Tandem shall release resources held for a completed, failed or cancelled request without removing shared state another active request still needs.\par
+\textbf{Fit criterion.} T-LIFE repeats these cases for \texttt{LIFECYCLE\_CYCLES}. No finished request retains its own allocation, and other active requests keep producing correct results. The engine may retain reusable cache data under its normal policy.\par
+\textbf{Source and rationale.} G2, G4; unused request allocations are different from caches intentionally kept for reuse.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-10}
-\textbf{FR-10 --- Report execution measurements}\par
-Tandem shall produce a structured per-request record containing run/request identity, selected model, terminal outcome, reuse decision and reason, timing, and actual prompt-work counts.\par
-\textbf{Fit criterion.} T-METRIC validates the record schema and checks counters against an instrumented short prompt. Missing observations have null values and reasons, never fabricated estimates labelled as measurements.\par
-\textbf{Source and rationale.} G1--G4; repeated work and failed optimization must be observable.
+\textbf{FR-10 --- Record what happened for each request}\par
+Tandem shall record the run and request IDs, selected model, final status, reuse decision and reason, timings, and actual prompt-token work in a structured result.\par
+\textbf{Fit criterion.} T-METRIC checks the result format and compares measured counts with a short known prompt. An unavailable measurement is marked missing with a reason rather than replaced by an estimate.\par
+\textbf{Source and rationale.} G1--G4; users need to see both the saved work and the failures.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-11}
-\textbf{FR-11 --- Replay matched workloads}\par
-The evaluation facility shall replay identical request contents, routing decisions, arrival traces and generation settings for native and Tandem conditions.\par
-\textbf{Fit criterion.} T-EVAL compares workload digests and manifests; any unapproved difference invalidates the comparison. Native prefix caching remains enabled when it is enabled in the declared baseline.\par
-\textbf{Source and rationale.} G1, G2; reducing baseline capabilities would bias the comparison.
+\textbf{FR-11 --- Use matching requests for comparisons}\par
+The test tools shall run the same requests, model choices, arrival times and response settings with and without Tandem.\par
+\textbf{Fit criterion.} T-EVAL compares request contents and configuration records. Unexplained differences invalidate the comparison. Existing prefix caching remains enabled whenever it is enabled in the baseline.\par
+\textbf{Source and rationale.} G1--G4, BR5; weakening the comparison system would give a misleading benefit.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-12}
-\textbf{FR-12 --- Produce reproducible comparisons}\par
-The evaluation facility shall report per-case and aggregate latency, throughput, prompt work, correctness differences, fallback outcomes and run configuration.\par
-\textbf{Fit criterion.} T-REPORT checks that another evaluator can identify source revision, dependencies, hardware, model artifacts, seeds, workload, trial counts, cache states and failures from the report and accompanying manifests.\par
-\textbf{Source and rationale.} G1--G4; results without configurations are not reproducible evidence.
+\textbf{FR-12 --- Make comparison results repeatable}\par
+The test tools shall report response times, completed requests per second, prompt work, total allocated GPU time and GPU time per completed request, output differences, fallback results and settings for individual cases and the overall run. Any estimated serving cost shall include its rates and calculation.\par
+\textbf{Fit criterion.} T-REPORT checks that another evaluator can find the code and library versions, hardware, model versions, random seeds, test requests, repetition counts, starting cache conditions and failures needed to repeat the test. The report includes cache-preparation and transfer overhead. Cost estimates follow the method in the Costs section; if no price is supplied, it reports GPU time without claiming money savings.\par
+\textbf{Source and rationale.} G1--G4; a speed result needs enough information to be checked independently.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-13}
-\textbf{FR-13 --- Control supported configurations}\par
-Tandem shall validate its configuration and expose an explicit reuse enable/disable control and a versioned allow-list of validated transfer profiles.\par
-\textbf{Fit criterion.} T-CONFIG rejects invalid entries, defaults unqualified pairs to native serving, and verifies that changing model or configuration revisions invalidates incompatible prior state.\par
-\textbf{Source and rationale.} C4, C5; configuration support requires evidence, not a name match.
+\textbf{FR-13 --- Control supported cache-reuse setups}\par
+Tandem shall check its settings, provide a reuse on/off control and keep a versioned list of tested model/cache setups.\par
+\textbf{Fit criterion.} T-CONFIG rejects inconsistent settings, uses normal processing for untested combinations, and prevents incompatible old caches from being used after a model or configuration change.\par
+\textbf{Source and rationale.} C4, C5; loading a model successfully does not show that cache reuse works for it.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-14}
-\textbf{FR-14 --- Qualify transfer profiles}\par
-The evaluation facility shall associate each enabled cross-model transfer profile with passing correctness, isolation and failure-handling evidence for its declared configuration and test domain.\par
-\textbf{Fit criterion.} T-QUAL attempts to enable a profile with missing or failed evidence; reuse stays disabled. Passing evidence records tested limits and does not claim universal equivalence.\par
-\textbf{Source and rationale.} G3, A4; feasibility must be demonstrated before performance claims rely on reuse.
+\textbf{FR-14 --- Test a setup before enabling reuse}\par
+The test tools shall keep passing output, privacy and failure-handling results for each model/cache setup enabled for cross-model reuse.\par
+\textbf{Fit criterion.} T-QUAL tries to enable a setup with missing or failed evidence; reuse stays off. A passing record lists the settings and limits that were actually tested.\par
+\textbf{Source and rationale.} C4, BR6, A4; the chosen transfer approach must work correctly before its speed is accepted.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-15}
-\textbf{FR-15 --- Handle cancellation and time bounds}\par
-Tandem shall accept a cancellation signal and enforce the configured request deadline for admitted work.\par
-\textbf{Fit criterion.} T-CANCEL cancels queued and running requests and exceeds \texttt{REQUEST\_TIMEOUT}; each terminates at a documented engine-safe boundary with the appropriate reason and satisfies \hyperref[req:FR-09]{\texttt{FR-09}}.\par
-\textbf{Source and rationale.} G4; deadline detection does not promise instantaneous interruption of a GPU operation.
+\textbf{FR-15 --- Stop cancelled or timed-out requests}\par
+Tandem shall accept cancellation and enforce the configured time limit for an accepted request.\par
+\textbf{Fit criterion.} T-CANCEL stops queued and running requests and lets a request exceed \texttt{REQUEST\_TIMEOUT}. Each ends with the right reason at a point the engine can safely stop, and releases resources under \hyperref[req:FR-09]{\texttt{FR-09}}.\par
+\textbf{Source and rationale.} G2, G4; an ongoing GPU operation may need to reach a safe stopping point first.
 
 
 \par\medskip\noindent\textbf{Formal specification of cache reuse and failure behaviour.}
 \label{sec:formal}
-This portion is formalized because an incorrect reuse decision can silently
-change a response or cross a request boundary. The specification refines
-\hyperref[req:FR-02]{\texttt{FR-02}}--\hyperref[req:FR-09]{\texttt{FR-09}}, \hyperref[req:FR-13]{\texttt{FR-13}}, \hyperref[req:FR-14]{\texttt{FR-14}} and \hyperref[req:SR-01]{\texttt{SR-01}}--\hyperref[req:SR-08]{\texttt{SR-08}}.
+These rules state exactly when a cache may be used and what happens if reuse
+fails. They are written mathematically because a mistake here could produce
+an incorrect response or use another request's private history. The equations
+make the prose requirements precise; they do not prescribe the internal code.
 
-Let $R$ be requests, $C$ candidate descriptors and $M$ the versioned set of
-qualified transfer profiles. For request $r$, $m(r)$ is its selected model
-revision, $d(r)$ its trusted reuse domain, $P(r)$ its complete target-rendered
-prompt token sequence and $H(r)$ the leading history portion before the new
-turn. For candidate $c$, $K(c)$ is the declared target-token prefix represented
-by the candidate and $n(c)=|K(c)|$. A profile identifies source/target artifacts,
-transfer-method revision, tokenizer/template revisions, position convention,
-precision, cache format and engine configuration. It includes the limits and
-passing evidence required by \hyperref[req:FR-14]{\texttt{FR-14}}.
+For example, if a conversation moves from Model A to Model B, Tandem must
+check that the proposed cache is prepared for the tested Model B setup, covers
+the exact required history and is permitted for this request. If any check
+fails, Model B processes the prompt normally.
 
-The following predicates are total Boolean checks; a missing value evaluates
-false rather than authorizing reuse.
+In the equations, $r$ is a request, $c$ is a possible cache, $C$ is the set
+of caches supplied for consideration, and $M$ is the list of tested model/cache
+setups. $m(r)$ is the chosen model version and $d(r)$ is
+the request's allowed sharing group. $P(r)$ is the complete prompt after the
+chosen model's formatting and tokenization. $H(r)$ is its history portion,
+without the new turn. $K(c)$ is the token sequence represented by the cache,
+and $n(c)=|K(c)|$ is its length. A tested setup records the model versions,
+transfer method, tokenizer, conversation format, positions, numeric precision,
+cache format and engine settings required by
+\hyperref[req:FR-14]{\texttt{FR-14}}.
+
+Each check below is either true or false. Missing information makes the check
+false, so incomplete information cannot permit reuse.
 \begin{description}
-\item[$V(r)$:] All request and configured model/input constraints hold.
-\item[$Q(c,r)$:] The complete candidate/request profile belongs to $M$ and
-falls within its declared validation limits.
-\item[$I(c,r)$:] $0<n(c)\leq |H(r)|$ and
-$K(c)=P(r)[1:n(c)]$, with matching rendering, tokenizer and token positions.
-\item[$A(c,r)$:] The hosting integration permits the represented context to
-be shared with $d(r)$; private source suffixes are excluded.
-\item[$D(c)$:] The complete candidate is ready, structurally valid, refers to
-live trusted state, and belongs to the current configuration epoch.
-\item[$B(c,r)$:] The engine can reserve the state and resources needed for
-this request without violating another active request's ownership.
+\item[$V(r)$:] The request has valid inputs and fits the selected model's limits.
+\item[$Q(c,r)$:] The model/cache setup is in the tested list $M$, and this
+request falls within the limits covered by those tests.
+\item[$I(c,r)$:] The cache covers a nonempty start of the history:
+$0<n(c)\leq |H(r)|$ and $K(c)=P(r)[1:n(c)]$. Its formatting, tokenizer and
+token positions also match.
+\item[$A(c,r)$:] The application permits this request to use the cached
+history. Another request's private instructions or answer are not included.
+\item[$D(c)$:] The cache is complete, ready, valid and still belongs to the
+current configuration version.
+\item[$B(c,r)$:] Enough usable resources can be reserved without changing
+cache data that another active request still needs.
 \end{description}
 \[
  E(c,r) \equiv V(r)\land Q(c,r)\land I(c,r)\land A(c,r)\land D(c)\land B(c,r).
 \]
-Let $u$ be the operator's reuse-enable control. The required initial decision is
+$E(c,r)$ is true only when \emph{all} of these checks pass. Let $u$ mean
+that the operator has turned cache reuse on. The initial choice is:
 \[
 \operatorname{path}(r)=
 \begin{cases}
 \text{reject}, & \neg V(r),\\
-\text{attempt reuse of an eligible }c, & V(r)\land u\land\exists c\in C:E(c,r),\\
-\text{native}, & V(r)\land(\neg u\lor\neg\exists c\in C:E(c,r)).
+\text{reuse }c, & V(r)\land u\land\exists c\in C:E(c,r),\\
+\text{normal processing}, & V(r)\land(\neg u\lor\neg\exists c\in C:E(c,r)).
 \end{cases}
 \]
-The choice among eligible candidates must preserve all invariants; an optimal
-candidate-selection algorithm is not specified. Accepted cache state covers
-$P(r)[1:n(c)]$ and uncached processing covers $P(r)[n(c)+1:|P(r)|]$. No token is
-logically skipped or counted twice. Shape agreement without $Q$ and $I$ is
-insufficient.
+In words: reject an invalid request; try reuse only when it is enabled and
+there is an acceptable cache; otherwise use normal processing. If several
+caches pass, choosing one must still satisfy every check.
 
-Execution progresses through admitted, preparing, generating and a terminal
-state. A reuse failure before any output event permits at most
-\texttt{RECOVERY\_LIMIT} native restart from valid state. If valid recovery is
-unavailable, the terminal state is failed. Once output has been emitted, an
-execution failure terminates the stream as failed; restarting output under the
-same successful response is forbidden. Cancellation or deadline expiration
-terminates with the corresponding reason at an engine-safe boundary. For every
-admitted request, exactly one terminal state is recorded:
+The cache covers $P(r)[1:n(c)]$. The model processes the remaining prompt,
+$P(r)[n(c)+1:|P(r)|]$, in order. No prompt token is skipped or logically
+processed twice. Matching cache sizes without the model and history checks
+is not enough.
+
+After a request is accepted, it is prepared, generates output and ends. If reuse
+fails before any output is returned, Tandem may restart normal processing at
+most \texttt{RECOVERY\_LIMIT} times. If a safe restart is not possible, report
+failure. If output has already started, report failure without appending a new
+answer. Cancellation or timeout also ends the request with the correct reason.
+Each accepted request has exactly one final status:
 \[
  \operatorname{terminal}(r)\in\{\text{completed},\text{failed},\text{cancelled}\}.
 \]
 
-For corresponding finite output logits $z_T,z_B$ at identical token prefixes,
-qualification requires, componentwise,
+For output checks, $z_T$ and $z_B$ are corresponding scores from the same
+selected model with and without Tandem. Both runs are given the same tokens
+up to the point being compared. For every finite score $j$, require
 \[
  |z_{T,j}-z_{B,j}|\leq\varepsilon_{\mathrm{abs}}
                  +\varepsilon_{\mathrm{rel}}|z_{B,j}|.
 \]
 Here $\varepsilon_{\mathrm{abs}}=\texttt{SCORE\_ATOL}$ and
-$\varepsilon_{\mathrm{rel}}=\texttt{SCORE\_RTOL}$. Invalid nonfinite values fail
-qualification; native masking conventions must be aligned before comparison.
-Greedy multi-token tests additionally require $Y_T=Y_B$ for the declared
-continuation or shared earlier stopping event. Equal seeds alone do not assert
-sample-by-sample equivalence for arbitrary sampling or scheduling~\hyperref[src:REPRO]{[REPRO]}.
-Profiles advertising sampled settings need additional declared validation for
-those settings; unqualified combinations use native serving.
+$\varepsilon_{\mathrm{rel}}=\texttt{SCORE\_RTOL}$. The first is a fixed small
+allowance; the second allows a difference proportional to the reference score.
+Unexpected nonfinite values, such as an invalid number, fail the test. Any
+normal token-masking rules must be applied consistently before comparison.
 
-The validation suite includes a native/native repeatability control before
-native/reuse comparison. Failed repeatability is an unresolved configuration,
-not evidence that a candidate passes. Qualification is evidence within a
-finite declared test domain, not a proof of equivalence for all possible prompts.
+Greedy generation must also produce the same token sequence, written
+$Y_T=Y_B$, for the specified test length or until both runs stop earlier.
+Setting the same random seed does not by itself guarantee that every sampled
+answer will match~\hyperref[src:REPRO]{[REPRO]}. Sampling settings need their
+own recorded checks before a setup is supported; otherwise the request uses
+normal processing.
+
+First, repeat the model run without Tandem to check that the chosen setup is
+stable enough for this comparison. Then compare runs with and without reuse.
+Passing the tests supports the tested requests and settings; it is not a
+mathematical proof that every possible prompt will behave identically.
 
 \par\medskip\noindent\textbf{Requirements traceability and validation.}
 \label{sec:trace}
-The table covers every numbered requirement. Source goals refer to G1--G4.
-Test identifiers name planned V\&V families, not executed tests. Candidate hazard
-identifiers are H1 (invalid cross-model state), H2 (cross-request disclosure or
-influence), H3 (stale/incomplete state), H4 (active-state lifetime failure), H5
-(private data in diagnostics), H6 (resource exhaustion), and H7 (corrupted
-recovery/stream). They are proposed links for reconciliation with the Hazard
-Analysis, not a completed FMEA.
+This table connects each requirement to its goals or supporting rules, related
+risk and planned test. G1--G4 are the project goals; C and BR refer to the
+constraints and business rules. T- names identify tests to be described in
+the V\&V Plan; they do not mean the tests have already run.
+
+The draft risk labels are H1: an incompatible cache changes the response;
+H2: one request uses or reveals another's private information; H3: an old or
+incomplete cache is used; H4: cache data is changed or removed while still in
+use; H5: logs reveal private data; H6: resources run out; and H7: a failed
+response is mixed with a restarted answer. These labels must be checked against
+the separate Hazard Analysis.
 
 \begin{longtable}{@{}p{0.21\textwidth}p{0.23\textwidth}p{0.50\textwidth}@{}}
-\toprule Requirements & Source / hazard & Planned validation\\\midrule\endhead
-\hyperref[req:FR-01]{\texttt{FR-01}} & G3, G4 / H6 & T-ADM: admission and limits.\\
-\hyperref[req:FR-02]{\texttt{FR-02}}, \hyperref[req:FR-03]{\texttt{FR-03}} & G1, G3 / H1, H2 & T-SEM, T-MATCH: model, prompt and prefix identity.\\
-\hyperref[req:FR-04]{\texttt{FR-04}}, \hyperref[req:FR-05]{\texttt{FR-05}} & G1, G3 / H1, H3 & T-COMP, T-REUSE: predicate rejection and valid integration.\\
-\hyperref[req:FR-06]{\texttt{FR-06}}, \hyperref[req:FR-07]{\texttt{FR-07}} & G4 / H3, H7 & T-NATIVE, T-FAIL: native paths and fault injection.\\
-\hyperref[req:FR-08]{\texttt{FR-08}}, \hyperref[req:FR-09]{\texttt{FR-09}}, \hyperref[req:FR-15]{\texttt{FR-15}} & G3, G4 / H4, H6, H7 & T-STATE, T-LIFE, T-CANCEL: identity, termination and resource ownership.\\
-\hyperref[req:FR-10]{\texttt{FR-10}}, \hyperref[req:FR-11]{\texttt{FR-11}}, \hyperref[req:FR-12]{\texttt{FR-12}} & G1--G4 & T-METRIC, T-EVAL, T-REPORT: measurements and matched evidence.\\
-\hyperref[req:FR-13]{\texttt{FR-13}}, \hyperref[req:FR-14]{\texttt{FR-14}} & G3, G4 / H1, H3 & T-CONFIG, T-QUAL: supported-profile gates.\\
-\hyperref[req:NFR-01]{\texttt{NFR-01}}, \hyperref[req:NFR-02]{\texttt{NFR-02}}, \hyperref[req:NFR-03]{\texttt{NFR-03}} & Integrator/operator roles, G3 & T-REPORT, T-USABILITY, T-TEXT.\\
+\toprule Requirements & Basis / risk & Planned test\\\midrule\endhead
+\hyperref[req:FR-01]{\texttt{FR-01}} & BR1, BR2 / H6 & T-ADM: valid requests, rejections and limits.\\
+\hyperref[req:FR-02]{\texttt{FR-02}}, \hyperref[req:FR-03]{\texttt{FR-03}} & G1, G3, BR1, BR3 / H1, H2 & T-SEM, T-MATCH: correct model and exact history match.\\
+\hyperref[req:FR-04]{\texttt{FR-04}}, \hyperref[req:FR-05]{\texttt{FR-05}} & G1, G2, BR6 / H1, H3 & T-COMP, T-REUSE: reject failed checks and use a valid cache.\\
+\hyperref[req:FR-06]{\texttt{FR-06}}, \hyperref[req:FR-07]{\texttt{FR-07}} & BR2 / H3, H7 & T-NATIVE, T-FAIL: normal processing and deliberately triggered failures.\\
+\hyperref[req:FR-08]{\texttt{FR-08}}, \hyperref[req:FR-09]{\texttt{FR-09}}, \hyperref[req:FR-15]{\texttt{FR-15}} & G2, G4, BR4 / H4, H6, H7 & T-STATE, T-LIFE, T-CANCEL: request IDs, final status and memory release.\\
+\hyperref[req:FR-10]{\texttt{FR-10}}, \hyperref[req:FR-11]{\texttt{FR-11}}, \hyperref[req:FR-12]{\texttt{FR-12}} & G1--G4, BR5 & T-METRIC, T-EVAL, T-REPORT: measurements and matching test setups.\\
+\hyperref[req:FR-13]{\texttt{FR-13}}, \hyperref[req:FR-14]{\texttt{FR-14}} & C4, C5, BR6 / H1, H3 & T-CONFIG, T-QUAL: tested setup list and approval checks.\\
+\hyperref[req:NFR-01]{\texttt{NFR-01}}, \hyperref[req:NFR-02]{\texttt{NFR-02}}, \hyperref[req:NFR-03]{\texttt{NFR-03}} & User needs, C4 & T-REPORT, T-USABILITY, T-TEXT.\\
 \hyperref[req:NFR-04]{\texttt{NFR-04}}, \hyperref[req:NFR-07]{\texttt{NFR-07}}, \hyperref[req:NFR-08]{\texttt{NFR-08}} & G1, G2, G4 & T-PERF, T-LOAD, T-NATIVE-PERF with T-STAT.\\
-\hyperref[req:NFR-05]{\texttt{NFR-05}}, \hyperref[req:NFR-06]{\texttt{NFR-06}} & G3, G4 / H1, H3, H7 & T-SCORE, T-GEN, T-FAIL.\\
-\hyperref[req:NFR-09]{\texttt{NFR-09}}, \hyperref[req:NFR-10]{\texttt{NFR-10}} & Maintainer/operator roles & T-QUAL, T-REPRO.\\
-\hyperref[req:NFR-11]{\texttt{NFR-11}}, \hyperref[req:NFR-12]{\texttt{NFR-12}} & Maintainer/operator roles & T-MAINT, T-DIAG.\\
-\hyperref[req:SR-01]{\texttt{SR-01}}, \hyperref[req:SR-04]{\texttt{SR-04}} & G3 / H2 & T-ISOLATION: domains, context and private suffixes.\\
-\hyperref[req:SR-02]{\texttt{SR-02}}, \hyperref[req:SR-05]{\texttt{SR-05}} & G3 / H1, H3 & T-COMP, T-RESTART.\\
-\hyperref[req:SR-03]{\texttt{SR-03}} & G3, G4 / H4 & T-LIFE.\\
-\hyperref[req:SR-06]{\texttt{SR-06}} & G3 / H5 & T-PRIVACY.\\
-\hyperref[req:SR-07]{\texttt{SR-07}} & G3, G4 / H1, H3, H6 & T-BOUND.\\
-\hyperref[req:SR-08]{\texttt{SR-08}} & G3, G4 / H7 & T-FAIL.\\
-\hyperref[req:DR-01]{\texttt{DR-01}}, \hyperref[req:DR-02]{\texttt{DR-02}} & All product-user roles & T-DOC, T-USABILITY, T-REPORT.\\
+\hyperref[req:NFR-05]{\texttt{NFR-05}}, \hyperref[req:NFR-06]{\texttt{NFR-06}} & BR1, BR2, BR6 / H1, H3, H7 & T-SCORE, T-GEN, T-FAIL.\\
+\hyperref[req:NFR-09]{\texttt{NFR-09}}, \hyperref[req:NFR-10]{\texttt{NFR-10}} & Maintainer/operator needs & T-QUAL, T-REPRO.\\
+\hyperref[req:NFR-11]{\texttt{NFR-11}}, \hyperref[req:NFR-12]{\texttt{NFR-12}} & Maintainer/operator needs & T-MAINT, T-DIAG.\\
+\hyperref[req:SR-01]{\texttt{SR-01}}, \hyperref[req:SR-04]{\texttt{SR-04}} & BR3 / H2 & T-ISOLATION: sharing permissions and private instructions/answers.\\
+\hyperref[req:SR-02]{\texttt{SR-02}}, \hyperref[req:SR-05]{\texttt{SR-05}} & C4, BR6 / H1, H3 & T-COMP, T-RESTART.\\
+\hyperref[req:SR-03]{\texttt{SR-03}} & G2, G4 / H4 & T-LIFE.\\
+\hyperref[req:SR-06]{\texttt{SR-06}} & BR3 / H5 & T-PRIVACY.\\
+\hyperref[req:SR-07]{\texttt{SR-07}} & C4, BR2 / H1, H3, H6 & T-BOUND.\\
+\hyperref[req:SR-08]{\texttt{SR-08}} & BR4 / H7 & T-FAIL.\\
+\hyperref[req:DR-01]{\texttt{DR-01}}, \hyperref[req:DR-02]{\texttt{DR-02}} & All direct users & T-DOC, T-USABILITY, T-REPORT.\\
 \bottomrule
 \end{longtable}
 
-The minimum workload matrix crosses same-model/model-switch turns with
-shared/non-shared history and eligible/absent/rejected candidates. It includes
-cold and warm native-cache cases, serial and concurrent arrival traces, and
-injected failures. Native and Tandem conditions use the same source conversations,
-selected models, generation settings, logical cache-hit opportunities and
-resource budgets. Actual achieved cache hits and all transfer/provider work
-are recorded; a disagreement in those conditions is a comparison limitation.
+The minimum test set includes same-model turns and model switches, with and
+without shared history. It also includes usable, missing and rejected caches;
+cold and warm caches; one request at a time and simultaneous requests; and
+forced failure cases. Both sides of a comparison use the same conversations,
+model choices, response settings, arrival times and resource limits.
+Reports record which cache hits actually occurred and any work required to
+prepare the caches. A difference between the setups must be explained.
 
-The initial public/synthetic trial grid uses the proposed prompt lengths and
-concurrency levels in Section~\ref{sec:constants}, clipped to the published
-configuration limits. Skipped cells are reported with reasons. Each cell has
-\texttt{WARMUP\_RUNS} untimed warm-ups and \texttt{PAIRED\_RUNS} paired timed trials;
-condition order alternates to reduce ordering bias. A report states uncertainty,
-failure counts, ordinary-path regressions and cases with no measurable gain.
+The starting prompt lengths and request counts are listed in
+Section~\ref{sec:constants}. Tests that exceed the model or hardware limits are
+skipped with a recorded reason. Each setup has \texttt{WARMUP\_RUNS} practice
+runs followed by \texttt{PAIRED\_RUNS} timed pairs. The order alternates so that
+one condition does not always run first. Reports include variation, failures,
+slowdowns and cases where no useful improvement is found.
 
-A failed/cancelled request is not silently dropped. Throughput counts completed
-requests over the declared arrival-to-final-terminal interval. TTFT is null with
-a reason for responses that emit no token; their count remains visible. End-to-end
-latency is measured from arrival to terminal outcome. Actual prompt-token counters
-are separated from logical prefix length, and allocated/reserved GPU memory is
-reported only when directly measured, not inferred from avoided token counts.
+Completed requests per second are counted over the period from the first
+arrival to the last final status. Failed and cancelled requests stay in the
+report and are not counted as successful completions. If a request returns no
+token, TTFT is recorded as unavailable with a reason. Full request time runs
+from arrival to its final status. Counts of actual prompt work are reported
+separately from the length of the shared history. GPU memory use is reported
+when measured directly; it is not guessed from the number of avoided tokens.
 
 \section{Look and Feel Requirements}
-\subsection{Appearance Requirements}
-A graphical interface, branding system and visual theme are not part of
-Tandem. The applicable presentation surface is diagnostics and evaluation output.
 
+
+\subsection{Appearance Requirements}
+Tandem does not provide a graphical interface. Users see command-line
+messages, logs and test reports. These outputs need clear labels and units.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-01}
-\textbf{NFR-01 --- Readable results}\par
-Tandem shall label human-readable result fields with their meanings and units, alongside machine-readable records.\par
-\textbf{Fit criterion.} T-REPORT confirms that native/reuse/fallback cases, metric units and failures are distinguishable without interpreting internal engine state.\par
-\textbf{Source and rationale.} Application integrators and operators need interpretable evidence.
+\textbf{NFR-01 --- Make results readable}\par
+Tandem shall give human-readable results clear field names and units as well as providing structured data for other programs.\par
+\textbf{Fit criterion.} T-REPORT checks that a reader can distinguish reused, normal and fallback processing, understand units and identify failures without examining engine internals.\par
+\textbf{Source and rationale.} Developers and operators need to understand the results.
 
 \subsection{Style Requirements}
-Human-readable messages use consistent terminology from the glossary.
-Every diagnostic includes a stable reason code; colour or icons alone do not
-carry success or failure meaning. Model-generated text retains the selected
-model's output and is not restyled by this integration.
+Messages use the same terms as the glossary and include a defined status
+or error code. Success and failure must be understandable without relying on
+colour or icons. Tandem returns the selected model's generated text without
+rewriting its style.
 
 \section{Usability and Humanity Requirements}
-\subsection{Ease of Use Requirements}
-The product is intended for technical users rather than general-public
-interaction. Ordinary requests use the existing serving interface; cache-provider
-integration is documented separately.
 
+
+\subsection{Ease of Use Requirements}
+Developers and operators use the existing serving API for ordinary requests.
+The instructions explain any additional setup needed to supply a cache.
+Application end users do not need a new interface or knowledge of caching.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-02}
-\textbf{NFR-02 --- Repeatable operator setup}\par
-A technical user with the documented prerequisites shall be able to install the release and reproduce its smoke example using the supplied instructions.\par
-\textbf{Fit criterion.} T-USABILITY has a reviewer who did not write the instructions follow them on a clean declared environment; all required commands and expected outcomes are available without undocumented intervention.\par
-\textbf{Source and rationale.} Operator persona; a procedural criterion is more defensible than an invented setup-time target.
+\textbf{NFR-02 --- Make setup instructions usable}\par
+A technical user with the listed prerequisites shall be able to install Tandem and run its basic setup example by following the instructions.\par
+\textbf{Fit criterion.} T-USABILITY asks a reviewer who did not write the instructions to follow them in a clean supported environment. Every necessary command and expected result must be documented.\par
+\textbf{Source and rationale.} Operators need a repeatable setup process.
 
 \subsection{Personalization and Internationalization Requirements}
-No personalized user interface or translated administrative interface is
-required in the initial release. Text inputs retain Unicode content under the
-selected tokenizer and rendering rules. Compatibility matching uses resulting
-token sequences, not language-dependent normalization invented by Tandem.
-
+The first version does not need personalized controls or translated
+administrative messages. It must preserve supported text, including Unicode
+characters, through the selected model's usual tokenizer and conversation
+format. Tandem must not rewrite text to make two histories appear to match.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-03}
-\textbf{NFR-03 --- Preserve supported text input}\par
-Tandem shall preserve valid Unicode request content through the selected model's documented rendering and tokenization path.\par
-\textbf{Fit criterion.} T-TEXT compares native and integrated prompts for accented characters, non-Latin scripts, whitespace and delimiters; no additional normalization changes the token sequence.\par
-\textbf{Source and rationale.} G3; text diversity must not create false prefix matches.
+\textbf{NFR-03 --- Preserve supported text}\par
+Tandem shall preserve valid Unicode input through the selected model's normal conversation formatting and tokenization.\par
+\textbf{Fit criterion.} T-TEXT checks accented characters, non-Latin scripts, whitespace and delimiters. The prompt tokens match normal processing, with no extra text changes introduced by Tandem.\par
+\textbf{Source and rationale.} C4; text differences must not lead to false history matches.
 
 \subsection{Learning Requirements}
-The user guide explains prefill, eligible reuse, fallback and the difference
-between configuring a model and qualifying its cache-transfer profile. Its
-smoke example includes one ordinary request and a recorded reuse outcome.
-Documentation acceptance is specified by \hyperref[req:DR-01]{\texttt{DR-01}} and \hyperref[req:NFR-02]{\texttt{NFR-02}}.
+The guide explains what cache reuse does, which setups are supported and
+what happens when reuse is unavailable. It includes a simple example that
+checks the installation and shows how to read a reuse result. Documentation is
+checked through \hyperref[req:DR-01]{\texttt{DR-01}} and
+\hyperref[req:NFR-02]{\texttt{NFR-02}}.
+
 \subsection{Understandability and Politeness Requirements}
-Diagnostic codes and remediation guidance are written for the stated
-technical users. A cache miss is described as a native-path outcome, not an
-application error. Reports distinguish experimental support from general model
-support. Messages identify the invalid field or configuration condition without
-reproducing private prompt contents.
+Messages explain the problem and what the operator can do next. If a cache
+cannot be used but the request can still run normally, the message says so.
+The documentation distinguishes a model that can load from a model/cache setup
+that has passed reuse tests. Messages identify invalid fields without repeating
+private conversation text.
+
 \subsection{Accessibility Requirements}
-The initial interface is programmatic and command-line based. Text output
-is readable without colour and machine-readable reports allow alternative
-presentation tools. A graphical accessibility certification is not applicable
-to this release. Training examples avoid requiring a particular visual editor.
+Commands and reports use readable text and do not depend on colour.
+Machine-readable results can be displayed by other tools. There is no graphical
+interface to assess in the first version. Instructions should work without
+requiring a particular visual editor.
 
 \section{Performance Requirements}
+
+
 \subsection{Speed and Latency Requirements}
 \label{sec:performance}
-Performance is evaluated on predeclared eligible model-switch workloads and
-on ordinary-serving controls. Timing covers queueing, validation, materialization,
-transfer, placement, remaining prefill and generation within the stated boundary.
-Model loading is either included in both cold-start cases or excluded from both
-steady-state cases. Cache-producer work and warming policy are reported rather
-than hidden. Results retain all completed, failed and cancelled counts.
+The main speed measure is how long the application waits for the first output
+token. Tests also measure the full request time and completed requests per
+second. The test set is chosen before the final comparison and includes cases
+where reuse should help and normal requests where it should not be needed.
 
-For paired trials, let $L_B,L_T$ be the per-trial median TTFT in baseline and
-Tandem conditions. Let $P_B,P_T$ be their tail percentiles and $Q_B,Q_T$ completed
-requests per second. Speedup is $S_L=L_B/L_T$; throughput ratio is $S_Q=Q_T/Q_B$.
-T-STAT computes intervals by paired resampling of whole independent trials at
-\texttt{CONFIDENCE}, using \texttt{BOOTSTRAP\_DRAWS}. A within-run request sample
-is not treated as independent experimental repetitions.
+Timing includes waiting in the queue, checking and preparing a cache, moving
+it into the engine, processing the rest of the prompt and generating output.
+Both sides of a comparison must handle model loading in the same way. Reports
+explain how caches were prepared and include any work needed to create or
+transfer them. Failed and cancelled requests remain visible.
 
+For each paired trial, $L_B$ is the median first-token wait without Tandem and
+$L_T$ is the same measure with Tandem. $P_B,P_T$ are their p95 waiting times,
+and $Q_B,Q_T$ are completed requests per second. We compare them using
+\[
+ S_L=L_B/L_T,\qquad S_Q=Q_T/Q_B.
+\]
+A value above one means an improvement. Test T-STAT calculates uncertainty
+ranges by repeatedly resampling complete pairs of trials, using the
+\texttt{CONFIDENCE} and \texttt{BOOTSTRAP\_DRAWS} settings. Individual requests
+from one run are not counted as separate independent runs. This helps avoid
+calling random timing changes an improvement.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-04}
-\textbf{NFR-04 --- Demonstrate useful latency improvement}\par
-The qualified integration shall reduce repeated target-model prompt work and show a median TTFT improvement beyond measured variation on at least one predeclared cross-model workload.\par
-\textbf{Fit criterion.} T-PERF observes a positive reduction in actual computed prompt tokens and a lower confidence bound for $S_L$ greater than unity, with passing output checks and no increase in failed requests. Other workloads and regressions are reported.\par
-\textbf{Source and rationale.} G1; a benefit is required for the optimization claim, without inventing a speedup percentage.
+\textbf{NFR-04 --- Show a useful reduction in waiting time}\par
+On at least one model-switch test chosen in advance, the tested integration shall reduce repeated prompt work and improve median first-token waiting time beyond normal timing variation.\par
+\textbf{Fit criterion.} T-PERF requires fewer actually computed prompt tokens and a lower confidence bound for $S_L$ above one. Output checks pass and failures do not increase. Results for other tests, including slowdowns, are reported.\par
+\textbf{Source and rationale.} G1, G2, G4; the project must demonstrate a measured benefit rather than assume a fixed speedup.
 
 \subsection{Safety-Critical Requirements}
-Tandem is not specified for a safety-critical deployment. Its relevant
-losses are incorrect output, disclosure, unavailable service and wasted resources.
-The safety/security requirements in Section~\ref{sec:security} remain core even
-when they reduce the attainable optimization. The separate Hazard Analysis must
-review the candidate hazard links in Section~\ref{sec:trace}.
-\subsection{Precision or Accuracy Requirements}
-Output agreement concerns the selected model's serving behaviour, not the
-truth or factual quality of the model's language. Qualification uses identical
-rendered prompts, numeric configurations and controlled greedy generation.
-Scores are compared at identical token prefixes, including multiple positions
-from a baseline-generated continuation; unconstrained divergent sampled
-continuations are not a valid numerical comparison.
+The prototype is not intended to control a safety-critical system. Relevant
+harms still include incorrect responses, disclosure of private information,
+unavailable service and wasted resources. The security requirements in
+Section~\ref{sec:security} apply even when their checks reduce the possible
+speed improvement. The Hazard Analysis will review the risks linked to those
+requirements.
 
+\subsection{Precision or Accuracy Requirements}
+The question here is whether using Tandem changes the selected model's
+response compared with running that same model normally. It is not a test of
+whether the model's answer is factually true.
+
+Tests use the same prompt, model version and calculation settings. They compare
+the model's next-token scores at the same places in the same text. They also
+compare several generated tokens using greedy generation, which always picks
+the highest-scoring next token. Comparing two answers that already contain
+different earlier tokens would not be a fair score comparison.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-05}
-\textbf{NFR-05 --- Bound output-score differences}\par
-For the declared correctness suite, each qualified profile shall satisfy the output-score tolerance and deterministic token-agreement rules in Section~\ref{sec:formal}.\par
-\textbf{Fit criterion.} T-SCORE compares corresponding finite logits using \texttt{SCORE\_ATOL} and \texttt{SCORE\_RTOL}, and T-GEN requires equal greedy token sequences over \texttt{CHECK\_TOKENS} or the shared earlier stop. A mismatch blocks qualification; thresholds cannot be loosened retrospectively to make a candidate pass.\par
-\textbf{Source and rationale.} G3; draft tolerances are explicit engineering proposals, not established numerical error bounds.
+\textbf{NFR-05 --- Keep the selected model's output consistent}\par
+Each supported cache-reuse setup shall meet the score-difference and generated-token checks in Section~\ref{sec:formal} for its declared test set.\par
+\textbf{Fit criterion.} T-SCORE checks corresponding scores using \texttt{SCORE\_ATOL} and \texttt{SCORE\_RTOL}. T-GEN requires the same greedy tokens for \texttt{CHECK\_TOKENS}, or until both runs stop earlier. A mismatch prevents approval; limits cannot be changed afterwards just to pass.\par
+\textbf{Source and rationale.} BR1, BR6; the listed tolerances are proposed values the team still needs to review.
 
 \subsection{Robustness or Fault-Tolerance Requirements}
-A valid request may lose an optimization without losing the ability to run
-natively. Malformed requests, unavailable target models and resource exhaustion
-can still prevent service; these cases have explicit outcomes.
-
+When an optional cache cannot be used, a valid request should still be able
+to run normally. Some problems, such as an unavailable model or an exhausted
+GPU, can prevent any response. Those problems need a clear failure status
+rather than silent loss of the request.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-06}
-\textbf{NFR-06 --- Avoid silent serving failures}\par
-Tandem shall classify admitted-request failures and preserve a usable native path after recoverable cache failures.\par
-\textbf{Fit criterion.} T-FAIL injects incomplete state, metadata mismatch, allocation failure and timeout; outcomes follow \hyperref[req:FR-07]{\texttt{FR-07}}, and a subsequent valid ordinary request succeeds whenever the underlying engine remains healthy. An unrecoverable engine failure is reported and requires operator recovery.\par
-\textbf{Source and rationale.} G4; native recovery is conditional on the engine and resources actually being available.
+\textbf{NFR-06 --- Report failures and allow later normal requests}\par
+Tandem shall explain why an accepted request failed and keep normal processing usable after a recoverable cache failure.\par
+\textbf{Fit criterion.} T-FAIL supplies incomplete caches, mismatched details, memory-allocation failures and timeouts. Results follow \hyperref[req:FR-07]{\texttt{FR-07}}. If the engine remains healthy, a later valid request can still finish normally. An engine that cannot recover requires operator attention.\par
+\textbf{Source and rationale.} C5, BR2; recovery depends on having a working engine and enough resources.
 
 \subsection{Capacity Requirements}
-Capacity is the declared concurrency and token/memory limits for a qualified
-configuration, not a hardware-independent request rate. Exceeding an advertised
-limit has a defined admission or resource-failure outcome.
-
+Capacity describes how many requests can run together and how much prompt
+text and memory a tested setup can handle. These limits depend on the models
+and hardware. Tests must also check what happens when a request exceeds them.
+Serving more requests is useful only if response delays remain acceptable.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-07}
-\textbf{NFR-07 --- Improve capacity with controlled delay}\par
-On at least one predeclared qualified shared-context workload, Tandem shall improve completed throughput beyond variation while respecting the tail-latency allowance.\par
-\textbf{Fit criterion.} T-LOAD obtains a lower confidence bound for $S_Q$ greater than unity and an upper bound for $P_T/P_B$ no greater than $1+\texttt{REGRESSION\_LIMIT}$, without additional failures. The exact load trace and achieved capacity are reported.\par
-\textbf{Source and rationale.} G2; throughput alone can conceal queueing delay.
+\textbf{NFR-07 --- Handle more requests without excessive delay}\par
+On at least one shared-history test chosen in advance, Tandem shall improve completed requests per second beyond timing variation while staying within the allowed p95 delay increase.\par
+\textbf{Fit criterion.} T-LOAD requires a lower confidence bound for $S_Q$ above one and an upper bound for $P_T/P_B$ no greater than $1+\texttt{REGRESSION\_LIMIT}$, with no extra failed requests. The requests and arrival times are reported.\par
+\textbf{Source and rationale.} G2, G4; serving more requests is not useful if the longer waits become unacceptable.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:NFR-08}
-\textbf{NFR-08 --- Limit ordinary-path regression}\par
-On native-control workloads, the integration shall remain within the declared latency and throughput regression allowance relative to the native baseline.\par
-\textbf{Fit criterion.} T-NATIVE-PERF requires upper confidence bounds for $L_T/L_B$ and $P_T/P_B$ no greater than $1+\texttt{REGRESSION\_LIMIT}$ and a lower bound for $Q_T/Q_B$ at least $1-\texttt{REGRESSION\_LIMIT}$. Insufficient precision is inconclusive and cannot be called a pass.\par
-\textbf{Source and rationale.} G4; the draft allowance is a proposed engineering budget for integration overhead.
+\textbf{NFR-08 --- Limit slowdowns for normal requests}\par
+For tests that do not need Tandem's cache reuse, the integration shall stay within the allowed changes to response time and throughput.\par
+\textbf{Fit criterion.} T-NATIVE-PERF requires upper bounds for $L_T/L_B$ and $P_T/P_B$ at most $1+\texttt{REGRESSION\_LIMIT}$ and a lower bound for $Q_T/Q_B$ at least $1-\texttt{REGRESSION\_LIMIT}$. If the uncertainty is too large, the result is inconclusive, not a pass.\par
+\textbf{Source and rationale.} G4, C5; the extra checks and bookkeeping must not cause excessive overhead.
 
 \subsection{Scalability or Extensibility Requirements}
-The initial scale is one server and a finite compatibility manifest.
-Additional model pairs, GPUs and deeper conversation branches are future work.
-Cross-server coordination and a promise of linear scaling are excluded.
-
+The first version supports one server and a recorded set of tested model
+combinations. More model pairs, GPU types and conversation branches can be
+added later. Coordinating several servers and guaranteeing proportional
+speedups as hardware is added are outside the initial scope.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-09}
-\textbf{NFR-09 --- Declare tested limits}\par
-Each release shall publish its qualified model profiles, concurrency/token limits and unsupported settings.\par
-\textbf{Fit criterion.} T-QUAL exercises supported boundaries and adjacent invalid values; advertised support is backed by results for that configuration. Untested profiles are identified as experimental or disabled.\par
-\textbf{Source and rationale.} G3, G4; model loadability alone is not evidence of valid cache transfer.
+\textbf{NFR-09 --- Publish supported models and limits}\par
+Each release shall list the model/cache setups that passed testing, their simultaneous-request and token limits, and unsupported settings.\par
+\textbf{Fit criterion.} T-QUAL checks supported limit values and values just beyond them. Each support claim has test results. Untested setups remain experimental or have reuse disabled.\par
+\textbf{Source and rationale.} C4, BR6; users need to know what has actually been checked.
 
 \subsection{Longevity Requirements}
-The deliverable is maintained through the capstone final release. A release
-preserves source revisions, environment manifests, permitted workload references
-and benchmark records so later readers can attempt reproduction. Continued
-compatibility with untested future engine or model revisions is not promised.
+The team plans to maintain the project through the final capstone release.
+Each release keeps the code version, dependency versions, test setup and results
+needed to repeat its checks. A future model or serving-engine update must be
+tested before it is listed as supported.
 
 \section{Operational and Environmental Requirements}
-\subsection{Expected Physical Environment}
-The deployment uses the host's normal data-centre or laboratory operating
-conditions. Tandem imposes no additional physical installation or sensor
-requirements. Power, cooling, storage availability and hardware maintenance are
-managed by the host; observable failures produce engine or request diagnostics.
-\subsection{Wider Environment Requirements}
-The target operating system is Linux with the selected GPU stack and model
-artifacts. Development on other systems can use small correctness examples;
-those results do not establish GPU-serving performance.
 
+
+\subsection{Expected Physical Environment}
+Tandem runs on a normally maintained laboratory or server-room computer.
+The host organization supplies power, cooling, storage and hardware maintenance.
+No extra sensors or physical equipment are required. Tandem reports hardware
+or system failures that the serving engine can detect.
+
+\subsection{Wider Environment Requirements}
+The main test environment is Linux with the selected GPU software and model
+files. Small correctness checks may also run on a development computer. Those
+small tests do not establish how fast the GPU server will run.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-10}
-\textbf{NFR-10 --- Record a reproducible environment}\par
-Every qualified release shall provide an environment manifest and commands sufficient to recreate its declared software configuration on compatible hardware.\par
-\textbf{Fit criterion.} T-REPRO reconstructs the declared environment and runs the smoke and correctness suites; artifact revisions, build options and configuration digests are identifiable. Performance reproduction reports hardware/load differences.\par
-\textbf{Source and rationale.} C1, G3; exact environments matter to numerical and serving behaviour.
+\textbf{NFR-10 --- Record how to recreate the test setup}\par
+Each tested release shall provide the software/hardware record and commands needed to recreate its declared software setup on compatible hardware.\par
+\textbf{Fit criterion.} T-REPRO rebuilds the setup and runs the basic and output tests. Model and dependency versions and build settings can be identified. Any hardware or competing-load differences are reported when repeating speed tests.\par
+\textbf{Source and rationale.} C1, BR5, BR6; the setup can affect both speed and numerical output.
 
 \subsection{Requirements for Interfacing with Adjacent Systems}
-The application/router contract is the request/response dictionary and
-\hyperref[req:FR-01]{\texttt{FR-01}}--\hyperref[req:FR-08]{\texttt{FR-08}}. Candidate state is supplied through a documented trusted
-adapter, with target representation and provenance explicit. Interface mappings
-and supported generation controls are versioned. End-user authentication remains
-with the host, which supplies the trusted sharing identity.
+The Data Dictionary and
+\hyperref[req:FR-01]{\texttt{FR-01}}--\hyperref[req:FR-08]{\texttt{FR-08}}
+define what applications send and receive. The cache provider uses a documented
+connection to the serving engine and supplies the cache's source, intended
+model and format. Supported response settings are listed by version. The host
+application checks user identity and assigns sharing permissions.
+
 \subsection{Productization Requirements}
-The prototype is installable from the repository with an explicit configuration,
-a native-only smoke path and a separately enabled validated reuse path.
-Model weights are obtained through their permitted distribution channels.
-Operational packaging follows \hyperref[req:NFR-02]{\texttt{NFR-02}}, \hyperref[req:NFR-09]{\texttt{NFR-09}}, \hyperref[req:NFR-10]{\texttt{NFR-10}} and \hyperref[req:DR-01]{\texttt{DR-01}};
-a hosted commercial service is not a release requirement.
+A developer should be able to install the prototype from the repository,
+set up the documented models and run a simple example with reuse turned off.
+Reuse can then be enabled for a setup that has passed its tests. Model files
+are obtained through permitted distribution channels. The initial deliverable
+is an installable prototype; hosting a commercial online service is outside scope.
+
 \subsection{Release Requirements}
-A release identifies its source revision, environment, compatibility manifest,
-known limitations and V\&V evidence. Its source and human-readable documents are
-available through the repository workflow. A release that fails qualification
-may be published as an experimental prototype, but cannot advertise the failing
-profile as supported or claim its performance goals have been achieved.
+Each release includes its code version, software requirements, supported
+model setups, known limitations and test results. Source and documents are
+available in the repository. A setup that fails a required test stays labelled
+experimental or has reuse disabled. A release cannot claim a performance goal or
+correctness requirement was met when its recorded tests show otherwise.
 
 \section{Maintainability and Support Requirements}
-\subsection{Maintenance Requirements}
-Likely changes include additional qualified profiles and revised serving
-versions. Maintenance acceptance concerns the effort observable for those
-changes, rather than imposing a particular class or module design.
 
+
+\subsection{Maintenance Requirements}
+Maintainers will need to add tested model combinations and respond to
+serving-engine updates. A routine setup change should not force application
+developers to change how they submit requests.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-11}
-\textbf{NFR-11 --- Bound a routine profile extension}\par
-A maintainer shall be able to add an additional profile for an already supported transfer method through documented configuration/adapter changes without modifying the external request schema or native fallback contract.\par
-\textbf{Fit criterion.} T-MAINT walks through a representative profile extension and confirms that existing interface and native-regression suites remain unchanged and passing. A fundamentally new transfer method is outside this routine-change criterion.\par
-\textbf{Source and rationale.} Serving-maintainer persona; extension should not force application rewrites.
+\textbf{NFR-11 --- Add a setup without changing application inputs}\par
+For an already supported transfer method, a maintainer shall be able to add a model/cache setup through documented settings or integration changes without changing application request fields or normal fallback behaviour.\par
+\textbf{Fit criterion.} T-MAINT follows one example extension and verifies that existing API and normal-processing tests still pass without changes to those tests. A completely new transfer method is outside this routine change.\par
+\textbf{Source and rationale.} Maintainers should not force application developers to rewrite requests for a new setup.
 
 \subsection{Supportability Requirements}
-Support uses repository issues with configuration identifiers, reason codes,
-steps to reproduce and sanitized examples. No service-desk response-time
-commitment is part of the capstone.
-
+Users report problems through repository issues. A useful report includes
+the model/software versions, error code, steps to repeat the problem and a
+non-private example. The capstone does not promise a support response time.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-12}
-\textbf{NFR-12 --- Provide actionable diagnostics}\par
-For each documented rejection, fallback and failure code, the release shall provide a meaning and an operator action or explicit statement that no action is required.\par
-\textbf{Fit criterion.} T-DIAG checks the reason-code catalogue against injected outcomes. Diagnostics disclose sufficient configuration identity for reproduction while satisfying \hyperref[req:SR-06]{\texttt{SR-06}}.\par
-\textbf{Source and rationale.} G4; a normal cache miss should not be confused with a broken request.
+\textbf{NFR-12 --- Explain status and error codes}\par
+The release shall explain every documented rejection, fallback and failure code and state what the operator should do, including when no action is needed.\par
+\textbf{Fit criterion.} T-DIAG compares the code list with deliberately triggered outcomes. Messages identify the setup sufficiently to repeat the problem while meeting \hyperref[req:SR-06]{\texttt{SR-06}}.\par
+\textbf{Source and rationale.} BR2, BR4; an unused cache must be distinguishable from a failed request.
 
 \subsection{Adaptability Requirements}
-A new hardware/software combination or model revision requires qualification.
-The documented compatibility boundary allows alternate transfer providers and
-serving backends, but supporting a second backend is not required for the initial
-release. Existing native operation must remain demonstrable after an extension.
+A new model version, GPU or software combination must pass the relevant
+tests before reuse is enabled. The cache connection should be documented so
+that another provider or serving engine can be considered later. The first
+release does not have to support a second serving engine.
 
 \par\medskip\noindent\textbf{Likely and unlikely changes.}
-LC1: Additional source/target pairs or artifact revisions are likely; isolate
-profile validation and configuration details. LC2: Serving interfaces and cache
-layouts may change; keep their versioned adapter boundary explicit. LC3:
-Evaluation workloads and hardware availability may expand; preserve a
-configuration-driven driver and reproducible result schema. LC4: Numeric
-acceptance defaults may be revised before baseline approval; keep them in the
-constants table with revision rationale.
+LC1: More model pairs and versions are likely to be added; their settings and
+tests should be easy to update.
+LC2: Serving engines may change their cache formats or interfaces; the code
+that connects Tandem to them should be identifiable and documented.
+LC3: Test requests and available hardware may change; test records should make
+those differences clear.
+LC4: The team may revise proposed test limits before approving the final plan;
+values and reasons belong in the settings table.
 
-UC1: Base-model training and router development remain outside the core
-boundary. UC2: The initial release does not coordinate multiple servers.
-UC3: Context eligibility remains exact and permission-scoped rather than a
-semantic similarity decision. These are scope expectations, not guarantees
-that a future project can never change them.
+UC1: Training base models and choosing the model for a request are expected to
+remain outside Tandem.
+UC2: The initial version is expected to remain a single-server project.
+UC3: Reuse is expected to require exact text-token matches and sharing permission,
+rather than accepting text merely because it has a similar meaning.
 
 \section{Security Requirements}
+
+
 \subsection{Access Requirements}
 \label{sec:security}
-The initial trust boundary is a configured local serving process and its
-trusted application/cache adapters. User accounts, external identity providers
-and internet-facing authentication are hosting responsibilities.
-
+The first version works within a server environment controlled by its
+operator. The application and cache provider are trusted parts of that setup.
+The host is responsible for accounts and network access; Tandem still checks
+whether the current request is allowed to use the proposed cached history.
 
 \par\medskip\noindent\phantomsection\label{req:SR-01}
-\textbf{SR-01 --- Enforce permitted context sharing}\par
-Tandem shall reuse cache state only when the hosting integration authorizes that context for the request's trusted reuse domain.\par
-\textbf{Fit criterion.} T-ISOLATION submits equal prefixes under different domains and attempts to override a domain from request-controlled data; unauthorized state is not used or exposed.\par
-\textbf{Source and rationale.} G3, BR3; candidate hazard H2 in the traceability section.
+\textbf{SR-01 --- Allow only permitted history sharing}\par
+Tandem shall reuse cached history only when the host application permits the current request to use it.\par
+\textbf{Fit criterion.} T-ISOLATION sends matching histories under different sharing groups and tries to change permission through request-controlled data. Unauthorized caches are neither used nor exposed.\par
+\textbf{Source and rationale.} BR3; addresses risk H2.
 
 \subsection{Integrity Requirements}
-Cache availability, structural compatibility and behavioural qualification are
-separate conditions. All are necessary for optimized serving.
-
+Before using a cache, Tandem needs to know that it is complete, matches the
+current settings and belongs to a model/cache setup that has passed its tests.
+Finding a cache in memory is not enough.
 
 \par\medskip\noindent\phantomsection\label{req:SR-02}
-\textbf{SR-02 --- Reject invalid or unqualified state}\par
-Tandem shall reject reuse of state with incomplete data, inconsistent metadata, stale configuration identity, unsupported provenance or failed qualification.\par
-\textbf{Fit criterion.} T-COMP varies each condition; native serving or an explicit engine/resource error follows, and no invalid candidate enters generation. Unknown transfer evidence is treated as unsupported.\par
-\textbf{Source and rationale.} G3; candidate hazards H1 and H3.
+\textbf{SR-02 --- Do not use incomplete or incompatible caches}\par
+Tandem shall not reuse a cache that is incomplete, has inconsistent details, belongs to an outdated setup, has an unsupported source, or failed the required tests.\par
+\textbf{Fit criterion.} T-COMP changes each condition separately. The request uses normal processing or receives a clear server/resource failure; the rejected cache never enters generation. Missing test evidence counts as unsupported.\par
+\textbf{Source and rationale.} C4, BR6; addresses risks H1 and H3.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:SR-03}
-\textbf{SR-03 --- Preserve active state lifetime}\par
-Tandem shall prevent reuse-state eviction, mutation or reassignment from invalidating state currently used by another request.\par
-\textbf{Fit criterion.} T-LIFE interleaves generation, cancellation, replacement and eviction attempts; active outputs satisfy \hyperref[req:NFR-05]{\texttt{NFR-05}}, and released ownership satisfies \hyperref[req:FR-09]{\texttt{FR-09}}.\par
-\textbf{Source and rationale.} G3; candidate hazard H4.
+\textbf{SR-03 --- Protect caches still in use}\par
+Tandem shall prevent a cache needed by an active request from being removed, changed or reassigned in a way that invalidates that request.\par
+\textbf{Fit criterion.} T-LIFE overlaps generation, cancellation and cache replacement/removal. Active output meets \hyperref[req:NFR-05]{\texttt{NFR-05}}, and finished requests release resources under \hyperref[req:FR-09]{\texttt{FR-09}}.\par
+\textbf{Source and rationale.} G2, G4; addresses risk H4.
 
 \subsection{Privacy Requirements}
-Shared conversation context can contain personal or confidential text.
-The capstone's published workloads use public or synthetic material; the serving
-contract still treats request contents and derived state as private.
-
+Conversation history and the calculations derived from it can contain private
+information. A request may use shared history only when permitted, and another
+request's private instructions or answer must stay separate. Published capstone
+tests use public text or made-up examples.
 
 \par\medskip\noindent\phantomsection\label{req:SR-04}
-\textbf{SR-04 --- Isolate private request state}\par
-Tandem shall prevent another request's non-shared instructions or generated suffix from entering the current request's reused context.\par
-\textbf{Fit criterion.} T-ISOLATION changes a sibling request's private instructions while holding the current request fixed; its controlled output-score differences meet \hyperref[req:NFR-05]{\texttt{NFR-05}}, with unchanged greedy output and a passing native/native isolation control.\par
-\textbf{Source and rationale.} G3; candidate hazard H2. Shared-prefix permission never grants access to private suffixes.
+\textbf{SR-04 --- Keep private instructions and answers separate}\par
+Tandem shall prevent another request's private instructions or generated answer from becoming part of the history reused by the current request.\par
+\textbf{Fit criterion.} T-ISOLATION changes another request's private instructions while keeping the current request fixed. Score changes meet \hyperref[req:NFR-05]{\texttt{NFR-05}}, greedy output stays the same, and the equivalent check without Tandem also passes.\par
+\textbf{Source and rationale.} BR3; addresses risk H2. Permission to share history does not grant access to private later text.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:SR-05}
-\textbf{SR-05 --- Bound persistence of derived context}\par
-The initial release shall keep candidate state within the configured serving lifetime and invalidate process-local reuse state on restart or incompatible configuration change.\par
-\textbf{Fit criterion.} T-RESTART confirms old handles cannot authorize reuse after a fresh process or epoch change. No prompt/cache persistence is created by Tandem's default logging or report path.\par
-\textbf{Source and rationale.} BR3; candidate hazard H3. This does not promise secure erasure of physical GPU memory managed by the host.
+\textbf{SR-05 --- Invalidate old caches after restart or setup changes}\par
+The first release shall limit reuse caches to the configured serving lifetime and invalidate their local references after a restart or incompatible configuration change.\par
+\textbf{Fit criterion.} T-RESTART checks that an old reference cannot permit reuse in a restarted process or changed setup. Default logs and reports do not save prompts or caches.\par
+\textbf{Source and rationale.} BR3; addresses risk H3. Physical GPU-memory erasure remains the host's responsibility.
 
 \subsection{Audit Requirements}
-Auditability concerns execution decisions and configuration identity rather
-than storage of conversation transcripts.
-
+Logs need to explain which request ran, which setup was used, whether a cache
+was reused and why a failure occurred. They do not need to store private
+conversation text to explain those decisions.
 
 \par\medskip\noindent\phantomsection\label{req:SR-06}
-\textbf{SR-06 --- Sanitize operational records}\par
-Normal logs and measurement exports shall omit raw prompts, generated text, cache tensors, credentials and request-controlled secrets while retaining identifiers and classified outcomes.\par
-\textbf{Fit criterion.} T-PRIVACY places sentinel secrets in inputs and state; normal exports contain none. Optional correctness traces use explicit operator enablement and synthetic/public fixtures, with documented retention.\par
-\textbf{Source and rationale.} BR3, G3; candidate hazard H5.
+\textbf{SR-06 --- Keep private contents out of normal logs}\par
+Normal logs and measurement files shall omit raw prompts, generated answers, cache data, credentials and request-controlled secrets while retaining IDs and status/reason codes.\par
+\textbf{Fit criterion.} T-PRIVACY places recognizable test secrets in requests and caches and checks that normal exports contain none. Detailed output traces require explicit operator enablement, public/synthetic test data and a stated storage lifetime.\par
+\textbf{Source and rationale.} BR3; addresses risk H5.
 
 \subsection{Immunity Requirements}
-Tandem does not execute prompt text as code or treat generated text as
-administrative configuration. Hosting software remains responsible for process,
-filesystem and network protection.
-
+Prompt text and generated answers are data, not commands for changing the
+server. Tandem does not execute them as code. The host remains responsible
+for operating-system, file and network protection.
 
 \par\medskip\noindent\phantomsection\label{req:SR-07}
-\textbf{SR-07 --- Validate resource and format boundaries}\par
-Tandem shall validate candidate descriptors and request sizes against the declared configuration before using their associated resources.\par
-\textbf{Fit criterion.} T-BOUND submits inconsistent lengths, invalid handles, unsupported layouts and over-limit requests; each has a classified native/rejection/failure outcome without an unbounded reuse retry.\par
-\textbf{Source and rationale.} G4; candidate hazards H1, H3 and H6.
+\textbf{SR-07 --- Check size and format limits}\par
+Tandem shall check request sizes and cache descriptions against the supported configuration before using the associated resources.\par
+\textbf{Fit criterion.} T-BOUND sends inconsistent lengths, invalid cache references, unsupported formats and oversized requests. Each has a clear rejection, normal-processing or failure outcome, with no unlimited retry loop.\par
+\textbf{Source and rationale.} C4, BR2; addresses risks H1, H3 and H6.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:SR-08}
-\textbf{SR-08 --- Recover without mixed responses}\par
-Tandem shall never report a concatenation of tokens from a failed reuse execution and a restarted native execution as one successful response.\par
-\textbf{Fit criterion.} T-FAIL forces a post-output error and verifies a failed terminal status; pre-output recovery uses the original identity without duplicate output.\par
-\textbf{Source and rationale.} G3; candidate hazard H7 and \hyperref[req:FR-07]{\texttt{FR-07}}.
-
+\textbf{SR-08 --- Do not mix a failed answer with a restarted answer}\par
+Tandem shall never present output from a failed reuse attempt followed by output from a restarted normal run as one successful response.\par
+\textbf{Fit criterion.} T-FAIL causes an error after output starts and checks that the final status is failed. A restart before output begins keeps the original request ID without duplicating output.\par
+\textbf{Source and rationale.} BR4; addresses risk H7 and \hyperref[req:FR-07]{\texttt{FR-07}}.
 
 \section{Cultural Requirements}
+
+
 \subsection{Cultural Requirements}
-No culture-specific interface, persona classification or content
-personalization is required. Administrative messages use neutral descriptions
-of technical conditions. Evaluation reports identify the languages and types
-of context represented and avoid claiming coverage of populations not tested.
-Model-generated cultural behaviour is inherited from the selected model and
-is not altered by a cache optimization.
+The administrative interface uses neutral technical language. Reports state
+which languages and types of conversation were tested, so readers do not assume
+the results apply to every language or user group. Tandem preserves the selected
+model's output; changing its cultural behaviour or personalizing its answers
+is outside this cache-reuse project.
 
 \section{Compliance Requirements}
+
+
 \subsection{Legal Requirements}
-The repository adopts the MIT licence for its own project work~\hyperref[src:DP]{[DP]}.
-Dependencies, model weights and datasets retain their own terms and notices;
-this SRS does not assert that all third-party artifacts are MIT-licensed.
-Redistributed examples must be permitted for that purpose. No regulatory or
-privacy-law certification is claimed. Deploying organizations remain responsible
-for obligations specific to their real data and application.
+Tandem's own code uses the repository's MIT licence~\hyperref[src:DP]{[DP]}.
+Models, datasets and other libraries keep their own licence conditions. The
+team must check those conditions before using or redistributing their files.
+Shared examples must be public, synthetic or used with permission. Organizations
+that later use Tandem with real user data remain responsible for their own
+privacy and legal obligations.
+
 \subsection{Standards Compliance Requirements}
-The document follows the supplied Volere outline and capstone checklist.
-The initial product does not claim certification against an external safety,
-security or interoperability standard. Interface compatibility is limited to
-the versioned subset documented by \hyperref[req:NFR-09]{\texttt{NFR-09}}; a familiar API shape is not a
-claim of complete protocol conformance.
+This SRS follows the supplied Volere outline and course checklist. Supported
+interfaces and settings are listed explicitly through
+\hyperref[req:NFR-09]{\texttt{NFR-09}}. The prototype does not claim external
+safety or security certification, or complete support for every option offered
+by the underlying serving engine.
 
 \section{Open Issues}
 \label{sec:open}
+The following decisions still need to be made or confirmed:
 \begin{longtable}{@{}p{0.10\textwidth}p{0.51\textwidth}p{0.33\textwidth}@{}}
-\toprule ID & Decision and consequence & Resolution gate\\\midrule\endhead
-OI1 & Select the transfer approach and an exact source/target pair; raw cache interchange is not assumed valid. & PoC feasibility review; no enabled profile before \hyperref[req:FR-14]{\texttt{FR-14}}.\\
-OI2 & Freeze engine/runtime versions, numeric precision, tokenizer/template revisions and GPU resources. & Before qualification and timing trials.\\
-OI3 & Approve or revise the proposed numeric tolerances and regression allowance using stakeholder needs and native repeatability. & Before freezing V\&V criteria; record rationale for changes.\\
-OI4 & Obtain external/proxy stakeholder feedback and record which requirements it supports. & Before the submission baseline is approved.\\
-OI5 & Reconcile the Development Plan's earlier concurrent-agent mechanism and schedule with the model-switching scope. & Before technical task assignment and PoC acceptance.\\
-OI6 & Review candidate hazards H1--H7 against the separate Hazard Analysis and reconcile its identifiers. & SRS/Hazard Analysis review.\\
-OI7 & Confirm GPU-time/storage quotas, model/data permissions and the exact workload set. & Before experiments are scheduled.\\
-OI8 & Complete individual reflections, course mappings and tool-identification disclosure details from actual team records. & Before final submission.\\
+\toprule ID & What needs deciding & When it is needed\\\midrule\endhead
+OI1 & Choose the model pair and the method used to prepare a compatible cache. & During the proof of concept; before reuse is enabled under \hyperref[req:FR-14]{\texttt{FR-14}}.\\
+OI2 & Choose exact software/model versions, calculation settings and GPU hardware. & Before correctness and timing tests.\\
+OI3 & Review the proposed output tolerances and acceptable slowdown. Check normal-run variation and potential users' needs. & Before approving the final test plan.\\
+OI4 & Ask potential users or representatives for feedback and record which requirements it affects. & Before approving the SRS for submission.\\
+OI5 & Align the Development Plan and Problem Statement goals with this SRS's prefill-reuse and cost-saving goals, keeping router development outside scope. & Before final technical task assignments and the proof-of-concept review.\\
+OI6 & Review H1--H7 in the Hazard Analysis and use consistent risk IDs in both documents. & During the SRS/Hazard Analysis review.\\
+OI7 & Confirm GPU time, storage and permissions to use the chosen models and test data. & Before booking and running experiments.\\
+OI8 & Complete personal reflections, course details and the required disclosure from the team's actual records. & Before final submission.\\
 \bottomrule
 \end{longtable}
-Open issues are approval decisions, not evidence of completed implementation.
-This draft supplies proposed contracts while making unresolved feasibility and
-team-specific facts visible.
+Recording these decisions does not mean they have already been resolved.
 
 \section{Off-the-Shelf Solutions}
+
+
 \subsection{Ready-Made Products}
-The native serving engine supplies model loading, generation and existing
-prefix-cache facilities. Its documented behaviour provides the baseline~\hyperref[src:APC]{[APC]}.
-The team must measure the chosen release before claiming that a particular
-model-switch workload has avoidable work. An existing engine can satisfy ordinary
-serving, but this document does not assume it already satisfies Tandem's
-cross-model integration and evaluation requirements.
+The serving engine already loads models, produces responses and can reuse
+some shared prompt prefixes~\hyperref[src:APC]{[APC]}. Those existing features
+are the starting point and stay enabled in the baseline. The team will first
+measure what the chosen engine version already does, then test whether Tandem
+adds a useful improvement when the selected model changes.
+
 \subsection{Reusable Components}
-Existing model/tokenizer loaders, tensor operations, native cache facilities,
-configuration tools and profiling interfaces are candidates for reuse. Their
-integration must satisfy the same request, isolation and output criteria.
-The V\&V suite includes checks at each external boundary; using a library does
-not establish transfer correctness.
+The team can reuse existing model loaders, tokenizers, tensor operations,
+cache functions and profiling tools. Reusing a library saves implementation
+work, but the combined system still needs the required output, privacy and
+failure-handling tests.
+
 \subsection{Products That Can Be Copied}
-No complete product is designated for copying. The team can adapt permitted
-examples and extension mechanisms from dependency documentation while retaining
-required notices. Reproducing an upstream benchmark requires its workload and
-configuration to be recorded; illustrative results are not Tandem results.
+The project will extend existing serving software rather than copy a whole
+application. Examples and extension code may be adapted when their licences
+allow it, with credit and required notices retained. Results published by
+another project provide background; they are not measurements of Tandem.
 
 \section{New Problems}
+
+
 \subsection{Effects on the Current Environment}
-Validation, cache materialization and bookkeeping can add CPU/GPU time,
-memory pressure and queueing. The integration may therefore regress workloads
-without useful sharing. The performance controls and explicit resource outcomes
-are required even if a selected switching workload improves.
+Cache checks, data movement and extra bookkeeping also take time and memory.
+They could make some requests slower, especially when no useful history can be
+reused. The tests therefore include normal requests as well as requests expected
+to benefit from Tandem.
+
 \subsection{Effects on the Installed Systems}
-An engine extension can become incompatible with upstream changes or an
-existing deployment configuration. Releases identify a supported baseline,
-provide a reuse-disabled mode and avoid silently changing the externally
-selected model or generation settings. Native regression testing precedes deployment.
+An engine update may break the code that loads reused caches. Each release
+must say which versions it supports and provide a way to turn reuse off.
+Tests check that the application still uses the same selected model and settings
+and that ordinary requests continue to work.
+
 \subsection{Potential User Problems}
-An operator might confuse model loadability with qualified reuse support,
-interpret fallback as request failure, or compare benchmark runs with different
-cache warmth. Documentation and diagnostics explain these distinctions.
-An application can still receive a model's incorrect factual answer; matching
-native behaviour is not factual validation of generated language.
+Users might assume that any model the engine can load also supports cache
+reuse, or think that an unused cache means their request failed. They might
+also compare tests where only one run started with a prepared cache. Instructions
+and reports must explain these cases. A model can still give a factually wrong
+answer even when Tandem produces exactly the same answer as normal processing.
+
 \subsection{Limitations in the Anticipated Implementation Environment That May
 Inhibit the New Product}
-Simultaneous model residency may exceed available memory. The engine may
-lack a stable cache-placement interface or accessible actual-prefill counters.
-Numeric repeatability may limit strict output checks. Transfer overhead can
-exceed saved prefill. Any of these can prevent qualification or a performance
-pass and must be reported rather than bypassed by weakened comparisons.
+The GPU may not have enough memory to hold the selected models together.
+The engine may not provide an easy way to insert a cache or measure actual
+prompt work. Small numeric differences may make exact repeatability difficult.
+Preparing and moving a cache may also take longer than reprocessing the history.
+Any of these problems can prevent a model setup from passing its tests or
+showing a speed benefit, and the report must say when this happens.
+
 \subsection{Follow-Up Problems}
-A dependency update, new model revision or newly discovered mismatch requires
-profile invalidation and requalification. If no feasible correct cross-model
-reuse profile is found, the team must review the project scope with course
-staff. An observability-only result is a possible revised project direction,
-not automatic satisfaction of the optimization requirements in this SRS.
+A new model/software version or a discovered output mismatch requires the
+affected reuse setup to be disabled and tested again. If the team cannot find
+a correct, useful cross-model method, it must review the scope with course
+staff. A tool that only measures repeated work could be a revised direction,
+but it would not automatically meet this SRS's optimization goals.
 
 \section{Tasks}
+
+
 \subsection{Project Planning}
-Work is tracked through the repository's issues and review workflow.
-The immediate tasks are scope reconciliation, stakeholder review, feasibility
-experiments, a pinned native baseline, cache-interface integration, qualification
-and matched performance evaluation. The Development Plan governs coordination.
-The following phase-in plan assigns responsibilities by function, not invented
-individual ownership; exact dates remain subject to the recorded course schedule.
+The repository's issues and review process track the work. The main tasks
+are to confirm the scope, get feedback from potential users, choose a feasible
+cache-transfer approach, measure the unmodified engine, add the integration,
+and compare its outputs and performance. The plan below uses role descriptions;
+the team will decide who takes each task.
+
 \subsection{Planning of the Development Phases}
 \label{sec:phases}
+These are planning windows from the Development Plan; the team will confirm
+exact dates against course announcements.
 \begin{longtable}{@{}p{0.19\textwidth}p{0.34\textwidth}p{0.41\textwidth}@{}}
-\toprule Phase / planning window & Requirements and responsibility & Exit evidence\\\midrule\endhead
-SRS/HA review; Oct 2026 & Requirements lead and reviewers; all proposed contracts and OI3--OI6. & Agreed scope, candidate hazard links, documented open decisions and stakeholder input.\\
-PoC; Nov 2026 & Feasibility and measurement owners; \hyperref[req:FR-01]{\texttt{FR-01}}, \hyperref[req:FR-02]{\texttt{FR-02}}, \hyperref[req:FR-03]{\texttt{FR-03}}, \hyperref[req:FR-10]{\texttt{FR-10}}--\hyperref[req:FR-14]{\texttt{FR-14}}, \hyperref[req:NFR-05]{\texttt{NFR-05}}, \hyperref[req:NFR-10]{\texttt{NFR-10}}. & Native repeatability, candidate-transfer correctness evidence and a go/no-go decision; no speedup assumed.\\
-Integration; Dec 2026--Jan 2027 & Serving/integration owners; \hyperref[req:FR-04]{\texttt{FR-04}}--\hyperref[req:FR-09]{\texttt{FR-09}}, \hyperref[req:FR-15]{\texttt{FR-15}}, \hyperref[req:SR-01]{\texttt{SR-01}}--\hyperref[req:SR-08]{\texttt{SR-08}}. & One declared profile integrated with native fallback and fault/isolation tests.\\
-Rev 0; Feb 2027 & QA and maintainers; all core FR/SR, \hyperref[req:NFR-01]{\texttt{NFR-01}}--\hyperref[req:NFR-03]{\texttt{NFR-03}}, \hyperref[req:NFR-06]{\texttt{NFR-06}}, \hyperref[req:NFR-09]{\texttt{NFR-09}}--\hyperref[req:NFR-12]{\texttt{NFR-12}}, \hyperref[req:DR-01]{\texttt{DR-01}}. & Reproducible integrated prototype and complete correctness/failure evidence.\\
-Final evaluation; Feb--Mar 2027 & Evaluation owners; \hyperref[req:NFR-04]{\texttt{NFR-04}}, \hyperref[req:NFR-07]{\texttt{NFR-07}}, \hyperref[req:NFR-08]{\texttt{NFR-08}}, \hyperref[req:DR-02]{\texttt{DR-02}}; all core regression checks. & Paired trials, uncertainty, resource observations and documented passes/failures.\\
-Final documentation / EXPO; Apr 2027 & Deliverable lead and reviewers. & Release manifest, traceability, limitations, final reports and approved reflections.\\
-Future & Unassigned; waiting-room capabilities. & Separate scope and qualification decisions.\\
+\toprule Phase / window & Work and requirements & Evidence needed to finish\\\midrule\endhead
+SRS/HA review; Oct 2026 & Requirements lead and reviewers check the draft and OI3--OI6. & Agreed scope, user feedback, risk links and a list of decisions still open.\\
+Proof of concept; Nov 2026 & Feasibility and measurement work; \hyperref[req:FR-01]{\texttt{FR-01}}--\hyperref[req:FR-03]{\texttt{FR-03}}, \hyperref[req:FR-10]{\texttt{FR-10}}--\hyperref[req:FR-14]{\texttt{FR-14}}, \hyperref[req:NFR-05]{\texttt{NFR-05}}, \hyperref[req:NFR-10]{\texttt{NFR-10}}. & Repeatable normal runs and evidence for whether the proposed transfer can preserve outputs. Decide whether to continue with the approach.\\
+Integration; Dec 2026--Jan 2027 & Serving-engine changes; \hyperref[req:FR-04]{\texttt{FR-04}}--\hyperref[req:FR-09]{\texttt{FR-09}}, \hyperref[req:FR-15]{\texttt{FR-15}}, \hyperref[req:SR-01]{\texttt{SR-01}}--\hyperref[req:SR-08]{\texttt{SR-08}}. & One working model setup, normal-processing fallback, and failure/privacy tests.\\
+Initial demonstration; Feb 2027 & Complete core functions and security checks, user instructions and supported-setup records. & A repeatable integrated prototype and test evidence, including \hyperref[req:NFR-01]{\texttt{NFR-01}}--\hyperref[req:NFR-03]{\texttt{NFR-03}}, \hyperref[req:NFR-06]{\texttt{NFR-06}}, \hyperref[req:NFR-09]{\texttt{NFR-09}}--\hyperref[req:NFR-12]{\texttt{NFR-12}}, \hyperref[req:DR-01]{\texttt{DR-01}}.\\
+Final evaluation; Feb--Mar 2027 & Speed/capacity tests and reporting; \hyperref[req:NFR-04]{\texttt{NFR-04}}, \hyperref[req:NFR-07]{\texttt{NFR-07}}, \hyperref[req:NFR-08]{\texttt{NFR-08}}, \hyperref[req:DR-02]{\texttt{DR-02}}. & Repeated paired results, uncertainty ranges and clear pass/fail conclusions. Rerun core checks after changes.\\
+Final documents / EXPO; Apr 2027 & Release and document review. & Supported settings, limitations, final reports, requirement links and approved reflections.\\
+Future work & Features in the Waiting Room section. & New scope and test decisions before implementation.\\
 \bottomrule
 \end{longtable}
 
 \section{Migration to the New Product}
+
+
 \subsection{Requirements for Migration to the New Product}
-An operator first reproduces native service with reuse disabled, validates
-the manifest, and runs the documented smoke/qualification suites. A qualified
-profile is enabled only after its limits are understood. Rollback disables
-reuse or restores the recorded native release. Existing application routing
-and conversation storage remain external and do not require redesign.
+An operator first checks that the models run normally with reuse turned off.
+They then follow the setup instructions and run the output and compatibility
+tests. Reuse is enabled only for a setup that passes. To return to the earlier
+behaviour, the operator turns reuse off or restores the recorded unmodified
+engine version. The application keeps its existing routing and conversation storage.
+
 \subsection{Data That Has to be Modified or Translated for the New System}
-No business-database migration is required. Native cache objects are not
-assumed portable between models or versions. Candidate state is accepted only
-through its declared target-ready representation and supported transfer profile.
-Old process-local handles are invalidated during restart or incompatible
-configuration change. Evaluation records use a versioned schema so later tools
-can detect incompatible formats.
+No application database needs to be converted. Existing caches are not
+assumed to work across models or software versions. The trusted provider must
+prepare a cache in the supported format, and Tandem must check it before use.
+References to old caches become invalid after a restart or incompatible
+configuration change. Measurement files record their format version so that
+analysis tools can detect an incompatible file.
 
 \section{Costs}
-The main expected costs are engineering time, GPU allocation, model storage,
-benchmark execution and maintaining compatibility with an upstream engine.
-The supplied records do not establish a monetary budget or measured operating
-savings. Reports therefore distinguish observed compute/memory changes from
-monetary estimates. Any later cost estimate states hardware prices, utilization
-and accounting assumptions explicitly; fewer computed tokens alone do not prove
-lower allocated GPU memory or lower expenditure.
-\section{User Documentation and Training}
-\subsection{User Documentation Requirements}
-The repository is the distribution point for installation, operation and
-reproduction instructions.
+Expected costs are development time, GPU time, model storage, test runs and
+maintenance when the serving engine changes. The project records do not yet
+provide a confirmed money budget or measured savings. Reducing repeated
+prefill is intended to reduce serving cost, and the tests must show whether
+the saved work outweighs the overhead of preparing and transferring caches.
 
+For each matching workload, report the total time for which each GPU is
+allocated to the run, including cache preparation and transfer. Sum that time
+across the GPUs used and divide by the number of successfully completed
+requests to obtain GPU time per completed request. Failures and their resource
+use remain in the totals; they must not make the result look cheaper.
+Also report actual prompt work, response delay and throughput so readers can
+see what changed.
+
+If GPU rental rates are supplied, estimate serving cost by multiplying each
+GPU's allocated hours by its stated hourly rate, adding any other included
+charges, and dividing by successful completions. State the rates, billing
+assumptions and which costs are included. With no price information, report
+resource savings rather than a money figure. On already-owned hardware,
+completing more requests with the same GPUs can be a capacity benefit even
+when the immediate bill stays the same.
+
+The main comparison keeps routing decisions unchanged to measure Tandem's
+contribution. Any additional comparison between a workload using one expensive
+model and a workload routed among cheaper models must be reported separately,
+with the model choices, prices and task-quality checks stated. Savings due to
+model selection must be distinguished from savings due to Tandem's prefill reuse.
+
+\section{User Documentation and Training}
+
+
+\subsection{User Documentation Requirements}
+The repository will contain instructions for installing, using, testing
+and troubleshooting Tandem.
 
 \par\medskip\noindent\phantomsection\label{req:DR-01}
-\textbf{DR-01 --- Document installation and operation}\par
-The release shall document prerequisites, supported profiles, request/response fields, reuse configuration, native-only operation, diagnostics, rollback and a reproducible smoke example.\par
-\textbf{Fit criterion.} T-DOC checks these topics and has an independent technical reviewer execute the example under \hyperref[req:NFR-02]{\texttt{NFR-02}}. Known limitations and the qualification boundary are explicit.\par
-\textbf{Source and rationale.} Application integrator, operator and serving-maintainer personas.
+\textbf{DR-01 --- Explain installation and operation}\par
+The release shall document prerequisites, supported setups, request/response fields, reuse controls, normal processing, error codes, rollback and a repeatable basic example.\par
+\textbf{Fit criterion.} T-DOC checks these topics and asks an independent technical reviewer to run the example under \hyperref[req:NFR-02]{\texttt{NFR-02}}. Supported limits and known problems are explicit.\par
+\textbf{Source and rationale.} Application developers, operators and maintainers need usable instructions.
 
 \subsection{Training Requirements}
-No formal training course is required. A short walkthrough uses public or
-synthetic context to demonstrate an ordinary request, eligible reuse, a
-rejected candidate and an explicit failure. Users can follow it using the
-release documentation and normal command-line tools.
-
+Users do not need a formal training course. A short walkthrough uses public
+or made-up text to show a normal request, successful reuse, a cache that cannot
+be used, and a processing failure. It explains the results and the next steps
+using ordinary command-line tools.
 
 \par\medskip\noindent\phantomsection\label{req:DR-02}
-\textbf{DR-02 --- Document evaluation interpretation}\par
-The release shall explain how to reproduce and interpret native/Tandem comparisons, including scope, cache warmth, uncertainty, failures and output-score tolerances.\par
-\textbf{Fit criterion.} T-DOC maps a sample report to its manifests and raw records and confirms that a failed or inconclusive requirement cannot be mistaken for achieved performance.\par
-\textbf{Source and rationale.} G1--G4; reproducible interpretation is part of the evaluation deliverable.
-
+\textbf{DR-02 --- Explain test results}\par
+The release shall explain how to repeat and interpret the normal-processing/Tandem comparison, including starting cache conditions, uncertainty, failures and output tolerances.\par
+\textbf{Fit criterion.} T-DOC follows a sample report back to its settings and individual results. A failed or inconclusive result must be clearly distinguishable from a passed requirement.\par
+\textbf{Source and rationale.} G1--G4; readers need to understand both the results and their limits.
 
 \section{Waiting Room}
-Deferred capabilities are deeper conversation branching, additional model
-families and GPU configurations, measured peak-memory reduction, and broader
-adapter/back-end support. Semantic matching of differently worded context,
-multi-server operation, router construction and a public-facing application
-require new scope decisions. Deferred work does not weaken initial correctness,
-isolation or fallback acceptance.
+Possible later features include more conversation branches, more model
+families, more GPU configurations, measured reductions in peak memory, and
+support for another serving engine. Reusing differently worded text, running
+across several servers, building a router or providing a public application
+would require an expanded project scope. These features are not needed to
+complete the initial release.
 
 \section{Ideas for Solution}
-The planned design direction is a serving-engine adapter that validates a
-candidate's declared target-ready representation, places it into appropriate
-engine-managed state, and continues with uncached prompt tokens. A pinned native
-engine remains the comparison and recovery path. A configuration-specific
-provider may supply an existing transfer technique; developing a new predictor
-is excluded. A separate evaluation driver supplies repeated traces and
-correctness checks. These are candidate design ideas subject to feasibility,
-not mandatory internal algorithms. The earlier tree-attention and KV-Promise
-approach in the Development Plan is not implicitly required by this revision.
+One possible design is a small integration layer between a trusted KV cache
+provider and the LLM serving engine. It validates the cache's target model,
+shared token prefix and compatibility metadata, then loads the accepted KV
+tensors into the engine's KV memory. The target model prefills the uncached
+prompt tokens and continues autoregressive decoding, generating one token at
+a time. If reuse is unavailable, the engine falls back to native prefill.
 
-\newpage{}
+Separate test tools send the same requests to the original engine and the
+modified engine and compare their outputs and performance. The team will choose
+an existing cache-transfer approach if a suitable one is available; inventing
+a new predictor is outside scope. The earlier tree-attention and KV-Promise
+ideas in the Development Plan are not required by this version of the SRS.
+
 \section{Appendix --- Generative AI Use Disclosure}
+
 
 \subsection{AI Tools Used}
 Generative writing assistance was used to prepare this requirements draft.
@@ -1251,8 +1476,8 @@ provide its actual verification record before approval. Accountability for the
 submission remains with the team.
 
 \newpage{}
-\section{Appendix --- Reflection}
 
+\section{Appendix --- Reflection}
 \input{../Reflection.text}
 
 The following are draft document-level observations and a proposed learning
@@ -1262,38 +1487,37 @@ are not asserted on members' behalf.
 \begin{enumerate}
 \item What went well while writing this deliverable?
 \par
-The current problem statement supplied bounded inputs, outputs and four goals.
-Using that boundary allowed the draft to separate reuse eligibility, native
-service and performance evidence, and to connect each numbered requirement to a
-validation method. The Volere structure also exposed operational and migration
-questions that are easy to miss when discussing only latency.
+The problem statement gave a clear starting point: what Tandem receives, what
+it returns and the scope of the work. Writing each requirement together
+with a way to test it helped turn those goals into concrete work. The Volere
+sections also encouraged us to consider installation, errors and future updates,
+as well as response speed.
 
 \item What pain points did you experience during this deliverable, and how did
   you resolve them?
 \par
-The Development Plan described an earlier concurrent-agent mechanism while the
-problem statement described model switches. This draft uses the newer product
-scope and records plan reconciliation as OI5. The absence of a selected model
-pair, measured native variability and stakeholder feedback prevented treating
-transfer support or numeric thresholds as established facts; OI1--OI4 make
-those gaps explicit.
+The Development Plan and problem statement described different versions of the
+idea. This draft follows the newer focus on switching between models, and OI5
+records the need to update the plan. We also still need to choose a model pair,
+check how much normal test results vary, and collect feedback from potential
+users. These decisions are listed as open issues instead of being treated as settled.
 
 \item How many of your requirements were inspired by speaking to your
   client(s) or their proxies (e.g. your peers, stakeholders, potential users)?
 \par
-A verified count is not available in the supplied consultation records. This
-draft derives requirements from the project documents and analytical roles.
-After consultation, the team must record actual sources and update this answer;
-no interview-derived requirement count is claimed here.
+The available project records do not give a confirmed count. The current draft
+uses the problem statement, development plan and needs of potential user groups.
+After speaking with users or representatives, the team should record which
+requirements came from their feedback and update this answer.
 
 \item Which of the courses you have taken, or are currently taking, will help
   your team to be successful with your capstone project.
 \par
-Relevant learning areas are requirements engineering, software testing,
-operating systems/concurrency, algorithms, computer architecture and machine
-learning. Each member must map these areas to courses actually taken or in
-progress before submission; a personal course history cannot be inferred from
-this repository.
+Useful subject areas include requirements engineering, software testing,
+operating systems, algorithms, computer architecture and machine learning.
+These areas help with writing testable requirements, understanding model
+execution, managing resources and measuring results. The team still needs to
+add the specific courses members have taken or are currently taking.
 
 \item What knowledge and skills will the team collectively need to acquire to
   successfully complete this capstone project?  Examples of possible knowledge
@@ -1303,35 +1527,40 @@ this repository.
   or presentation, or team management, etc.  You should look to identify at
   least one item for each team member.
 \par
-The team collectively needs to develop knowledge of serving-engine request
-handling and the KV-cache lifecycle, numerical equivalence and qualification
-methods, GPU scheduling and resource management, and failure recovery.
-Additional skills include controlled benchmarking, uncertainty analysis,
-requirements traceability, formal specification of cache eligibility, and
-failure-mode analysis. Clear technical writing, collaborative review and
-communication of experimental results will also be necessary. Learning
-responsibilities should be shared according to members' interests and
-experience, with cross-review so that critical knowledge is held by more than
-one person.
+The team needs to learn how a serving engine handles requests, stores cached
+calculations and releases memory. We also need to understand GPU scheduling,
+recovery from failures, and how to check that reuse preserves model output.
+For evaluation, we need to design fair speed tests and tell a real improvement
+from normal variation. Requirements writing, linking requirements to tests,
+identifying failure risks and explaining results clearly are also important.
+Learning should be shared so that more than one person understands each
+critical part of the system.
 
 \item For each of the knowledge areas and skills identified in the previous
   question, what are at least two approaches to acquiring the knowledge or
   mastering the skill?  Of the identified approaches, which will each team
   member pursue, and why did they make this choice?
 \par
-For engine lifecycle, compare documentation/code walkthroughs with instrumented
-small experiments; combine both to connect intended behaviour to observations.
-For numerical validation, compare theory-led reading with reference-implementation
-checks; use small native/native and native/reuse tests to expose numeric limits.
-For GPU resource behaviour, compare profiler tutorials with fault-injection
-experiments; pair profiling with bounded failure cases. For benchmarking,
-compare replication of a published procedure with constructing a synthetic trace;
-start with a reproducible synthetic trace, then review representativeness.
-For formalization and hazards, compare course examples with a requirements
-walkthrough against concrete request scenarios; use both to detect omissions.
-These are proposed approaches for the learning areas above. Each member must
-confirm their actual choice, rationale and progress before the reflection is
-submitted as a team account.
+For serving-engine behaviour, we can read the documentation and code, or run
+small experiments that show request and cache activity. Using both connects
+the explanation to behaviour we can observe.
+
+For output checks, we can study numerical comparison methods or build small
+reference tests. The proposed approach combines reading with repeated runs of
+the same model, first without Tandem and then with reuse.
+
+For GPU behaviour, we can follow profiling tutorials or deliberately trigger
+limited memory and cancellation cases. The proposed approach uses both to see
+where time and memory go and how failures are handled.
+
+For benchmarking, we can repeat an existing published procedure or build a
+small synthetic set of requests. We propose starting with a repeatable synthetic
+set and then asking whether it represents potential users' needs.
+
+For requirements and hazards, we can study course examples or walk through
+concrete success and failure scenarios. Both help identify missing requirements.
+The team must confirm the approaches actually chosen and add its experience
+before submitting the reflection.
 
 \end{enumerate}
 
