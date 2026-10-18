@@ -1,25 +1,15 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM
-import torch
+from util.common import retrieve_kv_cache_hugging_face_pytorch
 
-# 1. Define the model repository ID from Hugging Face
-model_name = "Qwen/Qwen2.5-0.5B-Instruct"
+model_family_one = "Qwen/Qwen2.5-0.5B-Instruct"
+model_family_two = "HuggingFaceTB/SmolLM2-360M-Instruct"
 
-# 2. Load the tokenizer and model
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    torch_dtype=torch.float32
-)
-model.eval()
+prompt = "Explain what a kv cache is."
 
-inputs = tokenizer("Explain KV caching.", return_tensors="pt")
+qwen_cache = retrieve_kv_cache_hugging_face_pytorch(model_family_one, prompt)
+smol_cache = retrieve_kv_cache_hugging_face_pytorch(model_family_two, prompt)
 
-with torch.no_grad():
-    outputs = model(**inputs, 
-                    use_cache=True)
+print("Qwen Cached tokens:", qwen_cache.get_seq_length())
+print("Qwen Layers:", len(qwen_cache.layers))
 
-cache = outputs.past_key_values
-
-print("Raw cache:", cache)
-print("Cached tokens:", cache.get_seq_length())
-print("Layers:", len(cache.layers))
+print("SmolLM2 Cached tokens:", smol_cache.get_seq_length())
+print("SmolLM2 Layers:", len(smol_cache.layers))
