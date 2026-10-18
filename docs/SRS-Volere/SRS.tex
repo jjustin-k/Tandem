@@ -1,305 +1,386 @@
-% THIS DOCUMENT IS FOLLOWS THE VOLERE TEMPLATE BY Suzanne Robertson and James Robertson
-% ONLY THE SECTION HEADINGS ARE PROVIDED
-%
-% Initial draft from https://github.com/Dieblich/volere
-%
-% Risks are removed because they are covered by the Hazard Analysis
+% Tandem SRS: LaTeX adaptation of the Meyer (PEGS) requirements structure.
+% Reference implementation: Sebastien Mosser, cas-handbook-req-template.
+% https://github.com/ace-lectures/cas-handbook-req-template
+% Adapted template scaffold: CC BY-NC-SA 4.0.
+% Changes: LaTeX implementation, new Tandem authoring prompts, and capstone
+% additions identified below. Preserve this path for the editor and build.
 \documentclass[12pt]{article}
 
+\usepackage[margin=1in]{geometry}
 \usepackage{booktabs}
 \usepackage{tabularx}
-\usepackage{hyperref}
-\hypersetup{
-    bookmarks=true,         % show bookmarks bar?
-      colorlinks=true,      % false: boxed links; true: colored links
-    linkcolor=red,          % color of internal links (change box color with linkbordercolor)
-    citecolor=green,        % color of links to bibliography
-    filecolor=magenta,      % color of file links
-    urlcolor=cyan           % color of external links
-}
-
-\newcommand{\lips}{\textit{Insert your content here.}}
+\usepackage{enumitem}
+\usepackage{amsmath,amssymb}
 
 \input{../Comments.text}
 \input{../Common.text}
 
+\setlength{\emergencystretch}{3em}
+\setcounter{tocdepth}{2}
+\setcounter{secnumdepth}{3}
+
+% Replace each authoring prompt with reviewed project content.
+\newcommand{\draftnote}[1]{\par\noindent\textit{To complete: #1}\par}
+\newcommand{\pending}{\textit{To be completed}}
+
+% Use Meyer's identifiers in headings and cross-references: G.1, E.1, etc.
+\newcommand{\requirementsbook}[2]{%
+  \clearpage
+  \renewcommand{\thesection}{#1}%
+  \section{#2}%
+  \label{book:#1}%
+}
+
+\title{Software Requirements Specification\\\progname\\
+  \large Meyer (PEGS) Template}
+\author{\authname}
+\date{October 18, 2026}
+
 \begin{document}
 
-\title{Software Requirements Specification for \progname: subtitle describing software} 
-\author{\authname}
-\date{\today}
-	
 \maketitle
-
-~\newpage
-
+\thispagestyle{empty}
+\clearpage
 \pagenumbering{roman}
 
-\tableofcontents
-
-~\newpage
-
 \section*{Revision History}
-
-\begin{tabularx}{\textwidth}{p{3cm}p{2cm}X}
-\toprule {\textbf{Date}} & {\textbf{Version}} & {\textbf{Notes}}\\
+\addcontentsline{toc}{section}{Revision History}
+\begin{tabularx}{\textwidth}{p{0.17\textwidth}p{0.22\textwidth}X}
+\toprule
+\textbf{Date} & \textbf{Contributor} & \textbf{Change}\\
 \midrule
-Date 1 & 1.0 & Notes\\
-Date 2 & 1.1 & Notes\\
+Oct 18, 2026 & Codex, at Musab Mondal's request &
+Replace the blank Volere template with a LaTeX adaptation of Meyer's
+structure and add capstone authoring sections.\\
 \bottomrule
 \end{tabularx}
 
-~\\
+\section*{About This Document}
+\addcontentsline{toc}{section}{About This Document}
 
-~\newpage
-\section{Purpose of the Project}
-\subsection{User Business}
-\lips
-\subsection{Goals of the Project}
-\lips
-\section{Stakeholders}
-\subsection{Client}
-\lips
-\subsection{Customer}
-\lips
-\subsection{Other Stakeholders}
-\lips
-\subsection{Hands-On Users of the Project}
-\lips
-\subsection{Personas}
-\lips
-\subsection{Priorities Assigned to Users}
-\lips
-\subsection{User Participation}
-\lips
-\subsection{Maintenance Users and Service Technicians}
-\lips
+This document uses Bertrand Meyer's four-book requirements structure:
+Goals (G), Environment (E), System (S), and Project (P). It follows the
+structure described in Meyer's
+\href{https://se.inf.ethz.ch/requirements/plan.pdf}{Standard Plan for
+Requirements} and the
+\href{https://github.com/ace-lectures/cas-handbook-req-template}{McMaster
+template by S\'ebastien Mosser}. The adapted template scaffold is provided
+under \href{https://creativecommons.org/licenses/by-nc-sa/4.0/}{CC BY-NC-SA 4.0}.
+The structure has been implemented in LaTeX with new authoring prompts
+for Tandem. The source remains at its existing repository path to preserve
+the current editor and build setup.
 
-\section{Mandated Constraints}
-\subsection{Solution Constraints}
-\lips
-\subsection{Implementation Environment of the Current System}
-\lips
-\subsection{Partner or Collaborative Applications}
-\lips
-\subsection{Off-the-Shelf Software}
-\lips
-\subsection{Anticipated Workplace Environment}
-\lips
-\subsection{Schedule Constraints}
-\lips
-\subsection{Budget Constraints}
-\lips
-\subsection{Enterprise Constraints}
-\lips
+The four books retain the standard chapter structure. The following
+capstone additions are included:
+\begin{itemize}[noitemsep]
+  \item Likely and unlikely changes under Section~\ref{sec:changes}.
+  \item Dedicated functional, quality, safety and security requirements,
+  plus a critical formal specification, under Section~\ref{sec:functionality}.
+  \item A traceability matrix under Section~\ref{sec:traceability} and a
+  requirements phase-in plan under Section~\ref{sec:schedule}.
+  \item Appendices for auxiliary constants, stakeholder consultation
+  evidence, AI use disclosure, and the course reflection questions.
+\end{itemize}
 
-\section{Naming Conventions and Terminology}
-\subsection{Glossary of All Terms, Including Acronyms, Used by Stakeholders
-involved in the Project}
-\lips
+\textbf{Draft status.} This file is an authoring framework. Italicized
+prompts and table placeholders are to be replaced with reviewed content.
+They are not approved requirements or evidence of completed activities.
+Use the latest Problem Statement and Goals when completing the scope;
+resolve differences with the Development Plan before carrying its earlier
+technical approach into this SRS.
 
-\section{Relevant Facts And Assumptions}
-\subsection{Relevant Facts}
-\lips
-\subsection{Business Rules}
-\lips
+Give each requirement a stable identifier, such as \texttt{FR-01},
+\texttt{NFR-01}, or \texttt{SR-01}. Record its statement, source, rationale
+where needed, and measurable acceptance criterion. Define quantities with
+symbolic names in Appendix~\ref{app:constants}. If a section does not
+apply, retain it and explain why.
+
+\clearpage
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+
+\requirementsbook{G}{Goals}
+
+\subsection{Context and Overall Objective}
+\label{sec:objective}
+\draftnote{Explain the need Tandem addresses, the intended audience, and
+the overall objective. Use the current model-switching scope in the
+Problem Statement and Goals.}
+
+\subsection{Current Situation}
+\draftnote{Describe the existing workflow and baseline serving behaviour.
+Support technical claims with sources or measurements, and distinguish
+observations from assumptions.}
+
+\subsection{Expected Benefits}
+\label{sec:benefits}
+\draftnote{State the benefits expected by stakeholders. Link numbered goals
+to the Problem Statement and Goals, and distinguish core goals from
+stretch goals. Leave detailed acceptance thresholds in the System book.}
+
+\subsection{Functionality Overview}
+\draftnote{Give a short overview of Tandem's capabilities, including context
+reuse, ordinary serving and fallback. Keep detailed requirements in
+Section~\ref{sec:functionality}.}
+
+\subsection{High-Level Usage Scenarios}
+\draftnote{Describe the main interactions from the user's or operator's
+viewpoint. Consider a model switch with reusable context, a model switch
+without reusable context, and ordinary same-model requests.}
+
+\subsection{Limitations and Exclusions}
+\draftnote{Define the product boundary and excluded work. Explain the
+rationale for scope decisions and identify stretch capabilities separately.}
+
+\subsection{Stakeholders and Requirements Sources}
+\label{sec:stakeholders}
+\draftnote{Identify relevant external stakeholder groups and their needs.
+Record the documents, consultations and other evidence from which
+requirements originate. Link actual consultation records to
+Appendix~\ref{app:elicitation}; do not invent meetings or feedback.}
+
+\requirementsbook{E}{Environment}
+
+\subsection{Glossary}
+\draftnote{Define all domain terms and acronyms used in this SRS, such as
+semantic routing, prefill, decode, KV cache, token and time to first token.}
+
+\subsection{Components}
+\label{sec:external-components}
+\draftnote{Describe systems and resources outside Tandem's boundary that
+interact with it. Include the request source, external routing decisions,
+models, tokenizers, serving environment and GPU resources as applicable.
+Include a context diagram with labelled inputs and outputs.}
+
+\subsection{Constraints}
+\draftnote{State externally imposed limitations and justify each one.
+Distinguish environmental constraints from implementation choices recorded
+in Section~\ref{sec:technical-choices}.}
+
 \subsection{Assumptions}
-\lips
+\draftnote{Number assumptions about the environment and explain their
+rationale. Identify how each assumption will be checked and what changes
+if it does not hold. Do not assume away cache or serving failures.}
 
-\section{The Scope of the Work}
-\subsection{The Current Situation}
-\lips
-\subsection{The Context of the Work}
-\lips
-\subsection{Work Partitioning}
-\lips
-\subsection{Specifying a Business Use Case (BUC)}
-\lips
+\subsection{Effects}
+\draftnote{Describe how operating Tandem may affect its environment,
+including computation, memory use and application response times.}
 
-\section{Business Data Model and Data Dictionary}
-\subsection{Business Data Model}
-\lips
-\subsection{Data Dictionary}
-\lips
+\subsection{Invariants}
+\draftnote{State properties of the environment that must remain true during
+operation, with precise conditions and scope. Distinguish these from
+internal implementation details.}
 
-\section{The Scope of the Product}
-\subsection{Product Boundary}
-\lips
-\subsection{Product Use Case Table}
-\lips
-\subsection{Individual Product Use Cases (PUC's)}
-\lips
+\requirementsbook{S}{System}
 
-\section{Functional Requirements}
-\subsection{Functional Requirements}
-\lips
+\subsection{Components}
+\label{sec:system-components}
+\draftnote{Describe Tandem's major functional responsibilities and their
+boundaries. Use only the decomposition needed to organize requirements;
+leave detailed architecture and algorithms for the design documents.}
 
-\section{Look and Feel Requirements}
-\subsection{Appearance Requirements}
-\lips
-\subsection{Style Requirements}
-\lips
+\subsubsection{Likely and Unlikely Changes}
+\label{sec:changes}
+\draftnote{List and justify likely changes, such as supported model
+configurations, and unlikely changes that define stable boundaries.
+Assign identifiers so the design can trace to these expectations.}
 
-\section{Usability and Humanity Requirements}
-\subsection{Ease of Use Requirements}
-\lips
-\subsection{Personalization and Internationalization Requirements}
-\lips
-\subsection{Learning Requirements}
-\lips
-\subsection{Understandability and Politeness Requirements}
-\lips
-\subsection{Accessibility Requirements}
-\lips
+\subsection{Functionality}
+\label{sec:functionality}
 
-\section{Performance Requirements}
-\subsection{Speed and Latency Requirements}
-\lips
-\subsection{Safety-Critical Requirements}
-\lips
-\subsection{Precision or Accuracy Requirements}
-\lips
-\subsection{Robustness or Fault-Tolerance Requirements}
-\lips
-\subsection{Capacity Requirements}
-\lips
-\subsection{Scalability or Extensibility Requirements}
-\lips
-\subsection{Longevity Requirements}
-\lips
+\subsubsection{Functional Requirements}
+\draftnote{Write individually numbered, observable requirements for request
+handling, selected-model behaviour, context identification, cache reuse,
+native prefill, failure handling and reporting. Specify both successful
+operation and responses to invalid or unsupported inputs.}
 
-\section{Operational and Environmental Requirements}
-\subsection{Expected Physical Environment}
-\lips
-\subsection{Wider Environment Requirements}
-\lips
-\subsection{Requirements for Interfacing with Adjacent Systems}
-\lips
-\subsection{Productization Requirements}
-\lips
-\subsection{Release Requirements}
-\lips
+\subsubsection{Quality Requirements}
+\draftnote{Specify measurable requirements for latency, throughput, output
+agreement, resource use, reliability, usability, maintainability and other
+applicable qualities. Define the baseline and evaluation conditions.
+Use justified symbolic thresholds rather than unsupported numbers.}
 
-\section{Maintainability and Support Requirements}
-\subsection{Maintenance Requirements}
-\lips
-\subsection{Supportability Requirements}
-\lips
-\subsection{Adaptability Requirements}
-\lips
+\subsubsection{Safety and Security Requirements}
+\label{sec:safety}
+\draftnote{Include requirements addressing request isolation, cache
+integrity, permitted reuse, fallback and other mitigations identified in
+the Hazard Analysis. Link each requirement to its hazard or failure case.}
 
-\section{Security Requirements}
-\subsection{Access Requirements}
-\lips
-\subsection{Integrity Requirements}
-\lips
-\subsection{Privacy Requirements}
-\lips
-\subsection{Audit Requirements}
-\lips
-\subsection{Immunity Requirements}
-\lips
+\subsubsection{Formal Specification of Critical Behaviour}
+\label{sec:formal}
+\draftnote{Select and justify a critical part of Tandem to formalize.
+Cache eligibility and fallback are a candidate. Define the domains,
+predicates, states, preconditions and required outcomes precisely, then
+trace the specification to the corresponding prose requirements.}
 
-\section{Cultural Requirements}
-\subsection{Cultural Requirements}
-\lips
+\subsection{Interfaces}
+\label{sec:interfaces}
+\draftnote{Specify every input and output at Tandem's boundary: fields,
+types, units, valid ranges, required metadata and error indications.
+Include request identifiers, selected models, conversation context,
+generation settings, cache metadata, generated text and measurements as
+applicable. Describe externally observable interfaces without committing
+to unnecessary internal representations.}
 
-\section{Compliance Requirements}
-\subsection{Legal Requirements}
-\lips
-\subsection{Standards Compliance Requirements}
-\lips
+\subsection{Detailed Usage Scenarios}
+\draftnote{Give each scenario an identifier, actor or triggering event,
+preconditions, normal sequence, alternatives, failures and postconditions.
+Include accepted reuse, rejected reuse, unavailable context, ordinary
+serving and failure recovery. Link scenarios to requirement identifiers.}
 
-\section{Open Issues}
-\lips
+\subsection{Prioritization}
+\draftnote{Assign and justify requirement priorities. Distinguish the
+minimum viable scope, additional requirements and future capabilities.
+Use the same identifiers in the phase-in plan.}
 
-\section{Off-the-Shelf Solutions}
-\subsection{Ready-Made Products}
-\lips
-\subsection{Reusable Components}
-\lips
-\subsection{Products That Can Be Copied}
-\lips
+\subsection{Verification and Acceptance Criteria}
+\label{sec:acceptance}
+\draftnote{Define when each requirement is satisfied. Record the workload,
+configuration, metric, acceptance threshold and verification method as
+appropriate. Cross-reference the V\&V Plan for test procedures.}
 
-\section{New Problems}
-\subsection{Effects on the Current Environment}
-\lips
-\subsection{Effects on the Installed Systems}
-\lips
-\subsection{Potential User Problems}
-\lips
-\subsection{Limitations in the Anticipated Implementation Environment That May
-Inhibit the New Product}
-\lips
-\subsection{Follow-Up Problems}
-\lips
+\subsubsection{Traceability Matrix}
+\label{sec:traceability}
+\draftnote{Replace the placeholder row with links from requirements to
+goals or stakeholder evidence, hazards where applicable, and acceptance
+criteria or planned tests. Ensure all requirements are covered.}
 
-\section{Tasks}
-\subsection{Project Planning}
-\lips
-\subsection{Planning of the Development Phases}
-\lips
+\begin{table}[htbp]
+\centering
+\small
+\caption{Requirements traceability (to be completed)}
+\label{tab:traceability}
+\begin{tabularx}{\textwidth}{XXXX}
+\toprule
+\textbf{Requirement ID} & \textbf{Goal or source} &
+\textbf{Hazard ID, if applicable} & \textbf{Acceptance criterion or test}\\
+\midrule
+\pending & \pending & \pending & \pending\\
+\bottomrule
+\end{tabularx}
+\end{table}
 
-\section{Migration to the New Product}
-\subsection{Requirements for Migration to the New Product}
-\lips
-\subsection{Data That Has to be Modified or Translated for the New System}
-\lips
+\requirementsbook{P}{Project}
 
-\section{Costs}
-\lips
-\section{User Documentation and Training}
-\subsection{User Documentation Requirements}
-\lips
-\subsection{Training Requirements}
-\lips
+\subsection{Roles and Personnel}
+\draftnote{Identify responsibilities for requirements, implementation,
+review and validation. Reference the Development Plan for team working
+arrangements rather than duplicating it.}
 
-\section{Waiting Room}
-\lips
+\subsection{Imposed Technical Choices}
+\label{sec:technical-choices}
+\draftnote{Record justified decisions that constrain the solution, such
+as an imposed serving engine or supported platform. Distinguish confirmed
+constraints from candidates still being evaluated.}
 
-\section{Ideas for Solution}
-\lips
+\subsection{Schedule and Milestones}
+\label{sec:schedule}
+\draftnote{Map requirement identifiers to implementation and validation
+milestones, with dates and owners. Reconcile the Development Plan with the
+current scope before using its technical milestones.}
 
-\newpage{}
-\section{Appendix --- Generative AI Use Disclosure}
+\begin{table}[htbp]
+\centering
+\small
+\caption{Requirements phase-in plan (to be completed)}
+\label{tab:phase-in}
+\begin{tabularx}{\textwidth}{XXXX}
+\toprule
+\textbf{Milestone and date} & \textbf{Requirement IDs} &
+\textbf{Owner} & \textbf{Completion evidence}\\
+\midrule
+\pending & \pending & \pending & \pending\\
+\bottomrule
+\end{tabularx}
+\end{table}
 
-\wss{ChatGPT (version 5) was used to brainstorm ideas for the template for this disclose section.}
+\subsection{Tasks and Deliverables}
+\draftnote{Identify the work products needed for each milestone, including
+documentation, feasibility evidence, implementation and evaluation.
+Reference the project plan and identify deferred deliverables.}
+
+\subsection{Required Technology Elements}
+\draftnote{List required software, models, hardware and supporting tools,
+their purpose, relevant compatibility conditions and access limitations.
+Record any budget or resource constraints and supporting rationale.}
+
+\subsection{Risk and Mitigation Analysis}
+\draftnote{Describe project risks, such as feasibility uncertainty or
+hardware access, and the response to each. Reference the separate Hazard
+Analysis for system failure modes and trace its mitigation requirements
+to Section~\ref{sec:safety}.}
+
+\subsection{Requirements Process and Report}
+\draftnote{Describe how requirements are elicited, reviewed, changed and
+approved. Link stakeholder evidence, review issues and resulting decisions.
+Record unresolved questions and their planned resolution; update this
+section as activities are completed.}
+
+\clearpage
+\appendix
+\renewcommand{\thesection}{\Alph{section}}
+
+\section{Auxiliary Constants}
+\label{app:constants}
+\draftnote{Define every symbolic threshold used in the SRS, with its value,
+units and rationale. Resolve each value before claiming its associated
+requirement has a complete acceptance criterion.}
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Auxiliary constants (to be completed)}
+\label{tab:constants}
+\begin{tabularx}{\textwidth}{XXXX}
+\toprule
+\textbf{Symbol} & \textbf{Meaning} & \textbf{Value and units} &
+\textbf{Rationale or source}\\
+\midrule
+\pending & \pending & \pending & \pending\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Stakeholder Consultation Evidence}
+\label{app:elicitation}
+\draftnote{For each actual consultation, record its identifier, date,
+participant roles, questions, relevant feedback and resulting requirement
+identifiers. Reference meeting records where available. Clearly distinguish
+team proposals from stakeholder feedback.}
+
+\clearpage
+\section{Generative AI Use Disclosure}
 
 \subsection{AI Tools Used}
-
-\wss{Give the name of the AI tool(s) used and the version.}
+OpenAI Codex was used to convert the blank Volere document into a LaTeX
+adaptation of the Meyer structure at Musab Mondal's request.
+\draftnote{Record the model or version available to the team and any other
+AI tools that materially contribute to the completed SRS.}
 
 \subsection{How and Where Used}
-
-\wss{Explain what the tool(s) were used for.  Examples include: brainstorming,
-explaining a technical concept, reviewing the document, generating or modifying
-text, generating or modifying diagrams, identifying errors or omissions or
-inconsistencies.}
-
-\wss{For each of the uses, identify which parts of the document were affected.}
-
-\wss{You do not need to report every interaction, but you should disclose the 
-uses that materially contributed to your work}
+Codex reorganized the template into the four Meyer books, wrote authoring
+prompts, added capstone traceability and phase-in tables, and retained the
+shared team information and reflection questions. It consulted the Meyer
+Standard Plan and McMaster reference template. This conversion did not
+complete the requirements or supply stakeholder consultation evidence.
+\draftnote{Update this disclosure if AI assistance contributes to later
+requirements, diagrams, prose or review. Identify the affected sections.}
 
 \subsection{Verification of AI-Generated Content}
+\draftnote{Describe the team's actual review of the template adaptation and
+any later AI-assisted content. Check technical claims, requirement wording,
+formal definitions, references and acceptance criteria. Record compilation
+and other checks actually performed; do not present planned review as
+completed review.}
 
-\wss{\begin{itemize}
-    \item Describe how the team checked AI-generated or AI-assisted material
-    before including it in the document.
-    \item In particular, verify factual claims, technical assertions,
-    requirements, calculations, references, and other information for which an
-    AI system may produce incorrect or fabricated results.
-    \item \textbf{The team is responsible for the accuracy, completeness,
-consistency, and appropriateness of the submitted document, regardless of
-whether material was generated by a human or an AI system.}
-\end{itemize}}
+The team remains responsible for the accuracy, completeness, consistency
+and appropriateness of the submitted document.
 
-\newpage{}
-
-\section{Appendix --- Reflection}
+\clearpage
+\section{Reflection}
 
 \input{../Reflection.text}
-
 \input{../SRS_Reflection.text}
 
 \end{document}
