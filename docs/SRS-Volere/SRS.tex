@@ -487,13 +487,16 @@ per second, memory uses bytes and token counts are whole numbers.
 
 
 \subsection{Relevant Facts}
-F1: Tandem's current goal is to reduce repeated prompt processing when a
+\begin{itemize}
+\item \textbf{Fact 1:} Tandem's current goal is to reduce repeated prompt processing when a
 conversation switches models~\hyperref[src:PS]{[PS]}.
-F2: vLLM already supports reusing previously processed shared prompt prefixes;
+\item \textbf{Fact 2:} vLLM already supports reusing previously processed shared prompt prefixes;
 this reduces prefill work rather than the work of generating new tokens~\hyperref[src:APC]{[APC]}.
-F3: A cache must match the intended model, conversation and calculation settings.
+\item \textbf{Fact 3:} A cache must match the intended model, conversation and calculation settings.
 Having the same size is not enough to show it can be reused correctly.
-F4: Repeating model results requires controlled software and hardware settings~\hyperref[src:REPRO]{[REPRO]}.
+\item \textbf{Fact 4:} Repeating model results requires controlled software and hardware settings~\hyperref[src:REPRO]{[REPRO]}.
+\end{itemize}
+
 The supplied project files do not yet contain measured Tandem performance or
 proof that a chosen cross-model cache works.
 
@@ -611,16 +614,54 @@ test tools also compare runs with and without Tandem. Selecting the model and
 inventing a new cache-prediction method remain outside the project.
 
 \subsection{Work Partitioning}
-BE1: A request arrives. Check its inputs and find the selected model.
-BE2: A possible cache is available. Check it, then reuse it or process the
-prompt normally.
-BE3: The model produces a token. Return it with the correct request ID.
-BE4: A request finishes, fails, times out or is cancelled. Report its final
-status and release memory that no active request still needs.
-BE5: A test run starts. Send the same requests with and without Tandem and
-record the comparison.
-BE6: A configuration changes. Check the new settings and stop using cached
-state that no longer matches them.
+The tables divide Tandem's work by the events it must respond to. Part I
+identifies each event's inputs and outputs. Part II summarizes the associated
+business use case (BUC). The same event numbers are used in both tables.
+
+\begingroup
+\small
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.18}
+\begin{longtable}{|>{\centering\arraybackslash}p{0.14\textwidth}|>{\centering\arraybackslash}p{0.23\textwidth}|>{\centering\arraybackslash}p{0.27\textwidth}|>{\centering\arraybackslash}p{0.27\textwidth}|}
+\caption{Work Partitioning Part I}\label{tab:work-partitioning-inputs}\\
+\hline
+\textbf{Event Number} & \textbf{Event Name} & \textbf{Input} & \textbf{Output}\\
+\hline
+\endhead
+1 & Routed inference request received & Request ID, full prompt, target model selected by vLLM Semantic Router, and generation parameters. & Accepted request with validated inputs, or a rejection with a reason.\\
+\hline
+2 & Candidate KV cache available & Source KV cache reference, candidate target-model KV cache, and prefix and compatibility metadata. & Cache reuse decision and accepted KV state, or native-prefill fallback with a reason.\\
+\hline
+3 & Response token generated & Generated token, output position and request ID. & Streamed response token associated with the correct request.\\
+\hline
+4 & Request completed or stopped & Completion, failure, cancellation or timeout event. & Final request status and release of resources no active request still needs.\\
+\hline
+5 & Benchmark run requested & Recorded workload, routing decisions, serving configuration and test settings. & Comparison report with output checks, latency, throughput, prompt work and GPU time.\\
+\hline
+6 & Serving configuration changed & Updated model versions, cache-transfer settings, resource limits or reuse control. & Validated configuration and invalidated incompatible cache references, or a configuration error.\\
+\hline
+\end{longtable}
+
+\begin{longtable}{|>{\centering\arraybackslash}p{0.14\textwidth}|>{\centering\arraybackslash}p{0.815\textwidth}|}
+\caption{Work Partitioning Part II}\label{tab:work-partitioning-bucs}\\
+\hline
+\textbf{Event Number} & \textbf{Summary of BUC}\\
+\hline
+\endhead
+1 & Accept a routed inference request, validate its prompt and generation settings, and preserve the router-selected target model. Reject invalid inputs before generation begins.\\
+\hline
+2 & Reuse an eligible KV cache for the shared prefix and prefill only the uncached prompt suffix. Use native prefill when cross-model reuse is unavailable or unsuitable.\\
+\hline
+3 & Return generated tokens in order under the correct request ID so the application can assemble the model's response.\\
+\hline
+4 & Complete or stop the request, record one final status and release its resources while preserving shared KV state still needed by other active requests.\\
+\hline
+5 & Run matched workloads with and without Tandem. Compare output consistency, TTFT, throughput, prompt work and GPU time, and state the assumptions behind any estimated cost savings.\\
+\hline
+6 & Apply supported serving-configuration changes, prevent incompatible old caches from being reused and keep untested model/cache setups disabled.\\
+\hline
+\end{longtable}
+\endgroup
 
 \subsection{Specifying a Business Use Case (BUC)}
 \textbf{BUC1: Answer the next conversation message.} The application has a
