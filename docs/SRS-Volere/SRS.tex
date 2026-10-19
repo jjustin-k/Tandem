@@ -83,12 +83,6 @@ compatibility and output tests. If reuse is unavailable, the engine uses its
 The initial project runs on one GPU-equipped server and is used by other
 software through an application programming interface (API).
 
-This SRS is a draft for team review. It describes required behaviour, not
-completed features or measured improvements. The team still needs to choose
-the model pair and cache-transfer method and approve the test settings listed
-in Section~\ref{sec:open}. The latest Problem Statement and Goals sets the
-scope; the Development Plan needs updating where it describes the earlier idea.
-
 \subsection{Goals of the Project}
 Tandem aims to make applications that switch between language models cheaper
 and faster to run. Building on the model-switching scope in the problem
@@ -134,11 +128,12 @@ possible extensions after the core work succeeds.
 
 
 \subsection{Client}
-A potential client is a software company building a customer-support
-chatbot that uses several language models. Its development team wants the
-chatbot to respond quickly even when a conversation moves from one model
-to another. The company could help define useful requirements, such as which
-model combinations matter and how much delay users will accept.
+A potential client is a software company building an application that uses
+several language models. Cursor, whose AI development tools support multiple
+models, is the organizational example used in the personas below
+\hyperref[src:CURSOR]{[CURSOR]}. A customer-support chatbot company is another
+example. Such a development team could help define useful requirements,
+including which model combinations matter and how much delay users will accept.
 
 In this SRS, the \emph{client} is the organization whose application needs
 help guide Tandem's features. A university research lab developing a similar
@@ -146,10 +141,13 @@ assistant is another potential client. These are examples of organizations
 that could benefit from the project; a current contract is not required.
 
 \subsection{Customer}
-A potential customer is an AI hosting provider that runs language models
-for other software teams. Another is a company's internal AI infrastructure
-team. Either could choose to install Tandem on its servers to reduce repeated
-processing and handle more requests with the GPUs it already has.
+A potential customer is an AI hosting provider that runs large language models
+for other software teams. Together AI, which offers dedicated model inference,
+is the organizational example used in the personas below
+\hyperref[src:TOGETHER]{[TOGETHER]}. Another is a company's internal AI
+infrastructure team. An organization operating a compatible inference engine
+could adopt Tandem to reduce repeated prefill after a router switches models
+and handle more requests with its available GPUs.
 
 Here, the \emph{customer} is the person or organization that would adopt and
 operate Tandem. The client and customer may be the same organization: a software
@@ -159,55 +157,148 @@ is planned as an open-source project, adoption does not require buying a licence
 \subsection{Other Stakeholders}
 Other people who could benefit include:
 \begin{itemize}
-\item \textbf{Independent application developers:} could provide faster
+\item \textbf{Independent application developers looking to host local LLM:} could provide faster
 AI features without needing to build their own serving optimization.
-\item \textbf{Server operators:} could make better use of limited GPU capacity
+\item \textbf{Inference Data Center Operators:} could make better use of limited GPU capacity
 and see clear information about cache reuse and failures.
-\item \textbf{Serving-software maintainers:} could use the integration and its
-tests when improving how their software handles model switches.
 \item \textbf{Researchers:} could use the test tools and results to study
-when sharing cached calculations is useful and when it is unsafe or ineffective.
-\item \textbf{Application end users:} could receive answers sooner while
-keeping their conversations separate from other users' conversations.
+when sharing cached calculations is useful and when it is ineffective.
 \end{itemize}
-The capstone team, TA and instructor review the project's work. Model and
-library providers also matter because their software and model licences set
-conditions on what can be used and shared.
 
 \subsection{Hands-On Users of the Project}
-The people who directly use Tandem are application developers, server
-operators and researchers running tests. Developers send requests through the
-serving API and receive model responses. Operators choose the models and
-settings, turn cache reuse on or off, and investigate errors. Researchers run
-the same requests with and without Tandem and compare the results.
+Tandem is intended to be integrated into an LLM inference engine such as
+vLLM. Its users include inference-engine developers who maintain the
+integration, infrastructure operators who deploy it, researchers who evaluate
+it, and application developers who use the hosting system. The personas in
+the next subsection represent these roles: Alex Morgan, Together AI's
+inference operations team, Sofia Nguyen and Cursor's application team,
+respectively.
 
-These users are expected to know basic Linux commands and configuration files.
-People chatting with an application benefit indirectly and do not need to
-understand or operate Tandem.
+Engine developers work with KV cache validation and loading. Operators
+configure supported model pairs, enable or disable reuse, monitor GPU resources
+and investigate errors. Researchers compare the same workloads with and
+without Tandem. Application developers submit requests through the hosting
+inference system's existing API or programmatic interface; they do not need
+a separate Tandem API. Model selection remains the responsibility of the
+application or its router.
+
+Operators and researchers need basic Linux skills and familiarity with model
+serving and GPU resource limits. Developers modifying the integration also
+need knowledge of the engine and KV cache handling. People chatting with an
+application benefit indirectly and do not need to understand or operate Tandem.
 
 \subsection{Personas}
-The following example users describe different needs:
-\begin{description}
-\item[Chatbot developer.] Is building a support assistant that switches
-between models. Needs faster responses without changing the conversation
-history, selected model or generation settings.
-\item[Server operator.] Runs models on a limited GPU budget. Needs to know
-which setups are supported, how much memory is available and what to do if
-cache reuse fails.
-\item[Serving-software maintainer.] Reviews changes to the serving engine.
-Needs clear code interfaces, repeatable tests and evidence that normal requests
-still work after the optimization is added.
-\end{description}
+The following profiles represent potential users of Tandem. Cursor and
+Together AI are real-company examples, while Alex Morgan and Sofia Nguyen
+are fictional individual personas. The company profiles describe proposed
+adoption scenarios and inferred needs, not confirmed partnerships, internal
+architectures or requirements supplied by those companies. Each profile
+connects the user's work and challenges to relevant Tandem requirements.
+
+\par\medskip\noindent\phantomsection\label{persona:cursor}
+\textbf{Cursor (AI Application Company)}
+
+Cursor provides AI development tools with access to multiple models and
+model-routing options \hyperref[src:CURSOR]{[CURSOR]}. It represents an
+application company whose users work through tasks over several turns.
+In this persona's scenario, a coding conversation includes instructions,
+code and earlier responses that remain relevant when the selected model
+changes. The application team wants to balance model capability, inference
+cost and response latency. Repeating prefill for that shared context could
+reduce the benefit of moving a suitable request to a cheaper model.
+
+For this potential adoption scenario, Tandem would run in a compatible
+inference backend controlled by the company or its hosting provider; calling
+a hosted model API alone does not give access to that model's KV cache.
+The application team would need the complete conversation and the router's
+selected model to remain unchanged, supported model pairs to be documented,
+and measured evidence of latency and cost benefits. Valid requests would
+continue through native prefill when reuse is unavailable. These inferred
+needs inform \hyperref[req:FR-02]{\texttt{FR-02}},
+\hyperref[req:FR-06]{\texttt{FR-06}},
+\hyperref[req:FR-12]{\texttt{FR-12}} and
+\hyperref[req:DR-01]{\texttt{DR-01}}.
+
+\par\medskip\noindent\phantomsection\label{persona:together}
+\textbf{Together AI (Inference Hosting Provider)}
+
+Together AI offers dedicated model inference backed by reserved compute
+resources \hyperref[src:TOGETHER]{[TOGETHER]}. It represents a potential
+customer that operates model-serving infrastructure for other software teams.
+In this persona's scenario, its inference operations team manages GPU
+capacity, request queues and deployment reliability as demand changes.
+The team wants to complete more requests with the same resources while
+keeping TTFT acceptable. It also needs to investigate failures and keep
+customers' private conversation state separate.
+
+If evaluating Tandem in a compatible serving engine, Together AI's operations
+team would configure supported model pairs and KV cache-transfer settings,
+then monitor reuse decisions and resource use. It would need clear limits,
+useful failure reasons and a way to disable reuse while retaining native
+processing. An adoption decision would require measured benefits that include
+cache preparation and transfer overhead, along with privacy and correctness
+checks. Compatibility with Together AI's production stack would require a
+separate assessment. These inferred needs inform
+\hyperref[req:FR-13]{\texttt{FR-13}},
+\hyperref[req:NFR-07]{\texttt{NFR-07}},
+\hyperref[req:SR-01]{\texttt{SR-01}} and
+\hyperref[req:SR-07]{\texttt{SR-07}}.
+
+\par\medskip\noindent\phantomsection\label{persona:alex}
+\textbf{Alex Morgan (Inference-Engine Maintainer)}
+
+Alex Morgan is a systems developer who maintains an organization's vLLM-based
+inference deployment. Alex works with Python, GPU tensor operations and the
+engine's request-processing and KV cache code. The deployment receives
+regular model and dependency updates, so a change that works for one version
+cannot simply be assumed to work for the next. Alex needs to understand where
+Tandem inserts a transferred KV cache, which checks run before loading it and
+how the engine continues prefill and decoding afterwards.
+
+Alex would integrate and review Tandem's engine changes, diagnose cache-format
+or compatibility failures, and rerun tests after updates. Alex needs documented
+interfaces, versioned compatibility information and tests that reject
+unsupported caches. The integration must preserve the selected model's output
+and retain native processing when reuse cannot be used. These needs inform
+\hyperref[req:FR-04]{\texttt{FR-04}},
+\hyperref[req:FR-05]{\texttt{FR-05}},
+\hyperref[req:FR-14]{\texttt{FR-14}} and
+\hyperref[req:NFR-11]{\texttt{NFR-11}}.
+
+\par\medskip\noindent\phantomsection\label{persona:sofia}
+\textbf{Sofia Nguyen (LLM Inference Researcher)}
+
+Sofia Nguyen is a graduate researcher studying efficient LLM serving. She
+writes Python benchmark scripts and has experience measuring model latency,
+throughput and output consistency. Her laboratory has scheduled access to
+shared GPUs, so she must record hardware settings and competing workloads
+carefully. She wants to understand when cross-model KV cache reuse reduces
+prefill work and when preparation or transfer overhead makes it ineffective.
+A single fast demonstration is not enough for her to judge the approach.
+
+Sofia would run matched workloads with and without Tandem, keeping the
+requests, model-routing decisions and generation settings the same. She needs
+per-request measurements, repeated trials, output checks and records of cache
+hits, rejected caches and fallback outcomes. She also needs enough information
+to reproduce results and distinguish estimated cost savings from measured GPU
+time. Her needs inform \hyperref[req:FR-10]{\texttt{FR-10}},
+\hyperref[req:FR-11]{\texttt{FR-11}},
+\hyperref[req:FR-12]{\texttt{FR-12}} and
+\hyperref[req:NFR-05]{\texttt{NFR-05}}.
 
 \subsection{Priorities Assigned to Users}
 Keeping responses consistent with normal model processing and protecting
 private information come first. A speed improvement is not acceptable if it
-uses the wrong history or exposes another user's information.
+uses the wrong history or exposes another user's information. These needs
+apply to Cursor's application scenario, Together AI's hosting scenario,
+Alex Morgan's engine integration and Sofia Nguyen's evaluation results.
 
-Next, operators must be able to turn off reuse and keep normal request
-processing available. After those needs are met, the project aims to reduce
-users' waiting time and increase the number of requests the server can finish.
-Both measures are reported so that improving one does not hide a problem with the other.
+Next, Together AI's operations team and Alex Morgan represent the need to
+disable reuse and keep native processing available. After those needs are met,
+Cursor and Together AI represent the need for lower inference cost, shorter waiting time
+and greater serving capacity. Sofia Nguyen represents the need for repeatable
+evidence of those benefits. Reports include both latency and throughput so
+that improving one does not hide a problem with the other.
 
 \subsection{User Participation}
 Potential clients, customers and other users can review example requests,
@@ -215,6 +306,14 @@ error messages and proposed tests. Their feedback can help the team choose
 realistic model combinations, useful performance goals and clear recovery
 instructions. A developer, operator or researcher can also review the project
 as a representative of these user groups.
+
+Feedback should cover the roles represented by Cursor, Together AI,
+Alex Morgan and Sofia Nguyen. For example, an application developer could
+review the integration instructions, an operator could review recovery steps,
+an engine maintainer could review compatibility checks, and a researcher could
+review the benchmark design. Actual participants and their feedback will be
+recorded separately from these representative profiles. Using a company's
+name as an example does not mean its staff have been consulted.
 
 \par\medskip\noindent\textbf{Recording user feedback.}
 \label{sec:elicitation}
@@ -229,6 +328,8 @@ information for this draft. OI4 tracks the need to collect user feedback.
 Software maintainers need installation instructions, a list of supported
 versions and steps for repeating a reported problem. Server operators need
 clear error messages and instructions for returning to normal processing.
+Alex Morgan represents the engine-maintenance role, while the Together AI
+persona represents deployment operation and troubleshooting.
 The organization hosting the server remains responsible for repairing GPUs,
 maintaining the operating system and managing user access.
 
@@ -390,6 +491,13 @@ Accessed October 18, 2026.
 \url{https://docs.vllm.ai/en/latest/usage/reproducibility/}.
 Accessed October 18, 2026. The release manifest records the guidance applicable
 to the engine version actually evaluated.
+\item[CURSOR] \phantomsection\label{src:CURSOR} Cursor. \emph{Models \& Pricing}.
+\url{https://cursor.com/docs/models-and-pricing}.
+Accessed October 18, 2026.
+\item[TOGETHER] \phantomsection\label{src:TOGETHER} Together AI.
+\emph{Dedicated Model Inference}.
+\url{https://www.together.ai/dedicated-model-inference}.
+Accessed October 18, 2026.
 \end{description}
 
 \subsection{Business Rules}
