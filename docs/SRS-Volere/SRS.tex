@@ -61,7 +61,10 @@ Tandem is intended for people who build or run applications that use more
 than one large language model (LLM). For example, a customer-support chatbot might send
 simple questions to a smaller model and harder questions to a more capable
 model. Choosing a model based on the meaning or needs of a request is called
-\emph{semantic routing}. The application or an external router makes this choice.
+\emph{semantic routing}. In the planned deployment, vLLM Semantic Router
+selects the target model and routes the request to its inference backend.
+It is a routing component in the vLLM ecosystem, separate from the backend's
+prefill and decoding execution \hyperref[src:VSR]{[VSR]}.
 
 Using a trained model to produce an answer is called \emph{inference}.
 During \emph{prefill}, the model processes the input prompt, including the
@@ -180,7 +183,7 @@ and investigate errors. Researchers compare the same workloads with and
 without Tandem. Application developers submit requests through the hosting
 inference system's existing API or programmatic interface; they do not need
 a separate Tandem API. Model selection remains the responsibility of the
-application or its router.
+configured router, with vLLM Semantic Router used in the planned deployment.
 
 Operators and researchers need basic Linux skills and familiarity with model
 serving and GPU resource limits. Developers modifying the integration also
@@ -315,15 +318,6 @@ review the benchmark design. Actual participants and their feedback will be
 recorded separately from these representative profiles. Using a company's
 name as an example does not mean its staff have been consulted.
 
-\par\medskip\noindent\textbf{Recording user feedback.}
-\label{sec:elicitation}
-The stakeholder groups above are potential users, not a list of people already
-interviewed. No completed interviews are recorded in the supplied project files.
-For each future discussion, the team will record the date, participant's role,
-main feedback and the requirement IDs that changed because of it. The existing
-Problem Statement, Development Plan and course checklist provide the starting
-information for this draft. OI4 tracks the need to collect user feedback.
-
 \subsection{Maintenance Users and Service Technicians}
 Software maintainers need installation instructions, a list of supported
 versions and steps for repeating a reported problem. Server operators need
@@ -340,7 +334,8 @@ maintaining the operating system and managing user access.
 The initial project has these limits:
 \begin{description}
 \item[C1:] Run text-generation requests on one server.
-\item[C2:] Use the model selected by the application or router.
+\item[C2:] Use the target model selected by vLLM Semantic Router, or the same
+recorded routing decision when replaying a benchmark.
 \item[C3:] Use existing trained models; training the models is outside the project.
 \item[C4:] Reuse only an exact matching start of the conversation, using a
 model combination and cache-transfer method that have passed the required tests.
@@ -364,16 +359,40 @@ but GPU tests are needed to measure serving speed. The model pair for the
 first cache-reuse test has not yet been chosen.
 
 \subsection{Partner or Collaborative Applications}
-The application supplies the conversation history, new user message,
-chosen model and response settings. A trusted cache provider supplies a
-candidate KV cache, meaning one being considered for reuse, with metadata
-identifying its source model, target model and conversation prefix.
-The provider prepares the KV cache for the target model using the chosen
-transfer method; Tandem validates compatibility before loading it.
+In the planned vLLM deployment, the application sends the conversation messages
+and generation parameters, such as temperature and maximum output length.
+vLLM Semantic Router selects the target LLM and routes the inference request
+to the backend serving that model \hyperref[src:VSR]{[VSR]}.
+The target model is the router's decision, rather than a new choice made by
+Tandem.
 
-A separate test driver sends repeatable requests for performance testing.
-The application remains responsible for saving conversations and checking
-who its users are.
+For Tandem's engine integration, the logical inputs are the routed inference
+request and, when available, a reference to the previous model's
+\emph{source KV cache}. The cache stores attention state for the conversation
+prefix it covers. Cache metadata identifies the source model, target model,
+cached prefix and token positions. The KV tensors can remain in managed
+memory and be accessed through a cache handle or transfer mechanism; they
+need not be embedded in the application's HTTP request. This distinguishes
+Tandem's internal cache interface from the normal model-serving API
+\hyperref[src:VLLMAPI]{[VLLMAPI]}.
+
+The cache-transfer component uses the selected method to prepare a candidate
+KV cache for the target model. Tandem validates it, loads an accepted cache
+into the target model's KV memory, prefills the \emph{uncached prompt suffix},
+then continues autoregressive decoding. The suffix is every prompt token
+after the cached prefix. It includes the new user message and may include
+earlier messages or formatting tokens that the cache does not cover.
+A source model's raw KV tensors are not automatically compatible with another
+model. The transfer method and supported model pairs remain decisions for
+the proof of concept (OI1).
+
+The complete logical prompt, comprising conversation history and the new
+turn, remains available as text or token IDs for prefix validation and native
+prefill if reuse fails. Retaining this prompt does not mean recomputing its
+cached prefix when reuse succeeds. The cache-transfer component can be part
+of the engine integration; it does not require a separate external service.
+Benchmark scripts replay the same requests and routing decisions with and
+without Tandem. The application manages conversation storage and user access.
 
 \subsection{Off-the-Shelf Software}
 The project plans to reuse an existing serving engine, Python, PyTorch,
@@ -423,7 +442,7 @@ involved in the Project}
 \toprule Term & Meaning\\\midrule\endhead
 LLM & Large language model: a model that can generate text.\\
 Inference & Running a trained model to produce an output, rather than training its parameters.\\
-Semantic routing & Choosing a model based on what a request needs. The application or router makes this choice.\\
+Semantic routing & Selecting a target model based on request needs and configured policy. The planned deployment uses vLLM Semantic Router; Tandem uses its selection.\\
 Serving engine & Software that loads models, schedules requests and returns their responses.\\
 Source/target model & The earlier model whose work is used to prepare a cache, and the model selected for the current request.\\
 Token/tokenizer & A token is a piece of text, such as a word or part of a word. A tokenizer converts text into these pieces.\\
@@ -432,6 +451,10 @@ Decoding & The inference phase that generates response tokens one at a time, usi
 Attention & The model mechanism that uses query, key and value tensors to combine information from tokens in the context.\\
 Tensor & A multidimensional array of numbers used to store model data and intermediate results.\\
 KV cache & Key-value cache: the key and value tensors stored by attention layers for processed tokens, so they need not be calculated again.\\
+Source KV cache & Attention state from the previously used model. Its model, covered prefix and token positions are recorded before considering cross-model reuse.\\
+Cache handle & A reference used to locate managed KV tensors without placing the tensors themselves in the application request.\\
+Uncached prompt suffix & The prompt tokens after the cached prefix. These still require target-model prefill and can include more than the latest user message.\\
+Cache provider / transfer component & Trusted engine-side software that retrieves source KV state and prepares a candidate cache using the selected transfer method. It may be internal to the engine integration.\\
 Cross-model KV reuse & Reusing attention state across a source and target model through a tested transfer method. The cache must be prepared for the target model; ordinary caches are not automatically interchangeable.\\
 Prefix caching & Reusing a KV cache for an exact shared start of a prompt, avoiding repeated prefill for that prefix.\\
 Candidate cache & A cache being considered for reuse. It must pass the required checks before it is used.\\
@@ -491,6 +514,14 @@ Accessed October 18, 2026.
 \url{https://docs.vllm.ai/en/latest/usage/reproducibility/}.
 Accessed October 18, 2026. The release manifest records the guidance applicable
 to the engine version actually evaluated.
+\item[VSR] \phantomsection\label{src:VSR} vLLM Semantic Router contributors.
+\emph{System Overview}.
+\url{https://github.com/vllm-project/semantic-router/blob/main/website/docs/overview/semantic-router-overview.md}.
+Accessed October 19, 2026.
+\item[VLLMAPI] \phantomsection\label{src:VLLMAPI} vLLM contributors.
+\emph{OpenAI-Compatible Server}.
+\url{https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/}.
+Accessed October 19, 2026.
 \item[CURSOR] \phantomsection\label{src:CURSOR} Cursor. \emph{Models \& Pricing}.
 \url{https://cursor.com/docs/models-and-pricing}.
 Accessed October 18, 2026.
@@ -501,7 +532,8 @@ Accessed October 18, 2026.
 \end{description}
 
 \subsection{Business Rules}
-BR1: Tandem uses the model chosen by the application.
+BR1: Tandem uses the router-selected target model. In the planned deployment,
+vLLM Semantic Router makes that selection; benchmark replay preserves it.
 BR2: A valid request can still run normally when no cache can be reused.
 BR3: Cached private information is shared only with requests allowed to use it.
 BR4: Responses, errors and measurements keep the correct request ID.
@@ -513,8 +545,9 @@ BR6: A model/cache setup is listed as supported only after it passes the require
 A1: The server operator controls the model files and settings. The initial
 cache provider runs in this trusted environment; users cannot upload arbitrary
 cache files directly.
-A2: The application supplies the intended history and model choice. Tandem still
-checks that the request is well formed and within supported limits.
+A2: The application supplies the intended conversation history and new turn;
+vLLM Semantic Router supplies the target-model selection. Tandem still checks
+that the request is well formed and within supported limits.
 A3: The available server can run the selected models normally. Tests still cover
 what happens when memory runs out.
 A4: The team can find at least one useful model pair and cache-transfer method.
@@ -555,7 +588,7 @@ Limits that depend on the model or GPU will be recorded with the tested setup.
 
 \subsection{The Current Situation}
 A conversation application saves the history and includes it with later
-requests. If it chooses a different model for the next turn, that model may
+requests. If vLLM Semantic Router selects a different model for the next turn, that model may
 need to process the history again. The serving engine may already have useful
 prefix-cache features, and those features stay enabled in the comparison.
 Tandem investigates whether a cache prepared for the new model can reduce
@@ -564,8 +597,9 @@ additional repeated work while preserving its response.
 \subsection{The Context of the Work}
 \begin{tabularx}{\textwidth}{@{}lX@{}}
 \toprule Outside system or user & Information exchanged with Tandem\\\midrule
-Application/router & Sends the request ID, history, new message, selected model and settings. Receives output tokens and completion or error status.\\
-Cache provider & Supplies a possible cache and details about its models, history, format, readiness and sharing permissions.\\
+Application & Supplies conversation messages, request ID and generation settings. Receives output tokens and completion or error status.\\
+Semantic router & Selects the target model and routes the inference request. The planned deployment uses vLLM Semantic Router.\\
+Cache component & Makes source KV state available by reference and prepares a candidate target-model cache with compatibility and prefix metadata.\\
 Server operator & Supplies supported settings and resource limits. Receives status information and error messages.\\
 Test driver & Sends repeatable requests at recorded times. Receives individual and summary measurements.\\
 \bottomrule
@@ -590,8 +624,9 @@ state that no longer matches them.
 
 \subsection{Specifying a Business Use Case (BUC)}
 \textbf{BUC1: Answer the next conversation message.} The application has a
-new message and has chosen a model. If a compatible cache is available,
-Tandem uses it to avoid repeating work on the history. Otherwise, the model
+new message, and vLLM Semantic Router selects the target model. If a compatible
+KV cache can be prepared for the shared prefix, Tandem loads it and prefills
+only the uncached suffix. Otherwise, the model
 processes the prompt normally. The application receives the response under
 the same request ID. Invalid inputs are rejected clearly, and a failure during
 processing is reported rather than presented as a successful answer.
@@ -606,8 +641,9 @@ resource use and failures. It states which models and settings were tested.
 
 \subsection{Business Data Model}
 A test run has a configuration record and a list of requests with arrival
-times. Each request has a unique ID, a selected model, an allowed sharing group
-and possibly one or more caches to consider. Each cache records where it came
+times. Each request has a unique ID, a router-selected model, an allowed
+sharing group and possibly a source KV cache reference and candidate
+target-model caches to consider. Each cache records where it came
 from, which model it is prepared for and which history it represents.
 
 Output events and measurements refer back to the request ID. Each accepted
@@ -617,16 +653,22 @@ the normal run and the Tandem run. The application, not Tandem, stores the
 long-term conversation history.
 
 \subsection{Data Dictionary}
+The fields below describe the logical inference inputs and engine-side cache
+state. They do not require the application to send KV tensors in an HTTP
+payload. The uncached suffix is derived after validating the cached prefix;
+the full prompt remains available for validation and fallback.
 \begin{longtable}{@{}p{0.20\textwidth}p{0.25\textwidth}p{0.49\textwidth}@{}}
 \toprule Field & Allowed value & Purpose\\\midrule\endhead
 \texttt{run\_id} & Nonempty text & Identifies one test run and its records.\\
 \texttt{request\_id} & Nonempty text, unique within the run & Connects a request to its output, final status and measurements.\\
 \texttt{history} & Messages in their original order & Includes the conversation and system instructions already provided.\\
 \texttt{latest\_message} & Text or a message with a role & The new turn, added using the selected model's conversation format.\\
-\texttt{model\_id} & Known model name and exact version & Records the application's selected model. Unknown models are rejected.\\
+\texttt{model\_id} & Known model name and exact version & Records the target model selected by vLLM Semantic Router or preserved by benchmark replay. Unknown models are rejected.\\
 \texttt{settings} & Supported response controls & Includes output length, sampling settings, stop rules and an optional random seed. Applied defaults are recorded.\\
 \texttt{reuse\_domain} & Sharing-group ID assigned by the host & Determines which requests may share specified history. A request cannot grant itself permission merely by naming a group.\\
-\texttt{candidate} & Optional reference to a cache & Lets the trusted local provider supply cache data for checking. A missing cache is allowed.\\
+\texttt{source\_kv} & Optional engine-side cache reference & Locates the previous model's KV state for the covered conversation prefix. It is input to the chosen transfer method, not automatically valid target-model state.\\
+\texttt{candidate} & Optional target-model cache reference & Identifies the cache prepared by the transfer component for Tandem's compatibility checks. A missing cache is allowed.\\
+\texttt{suffix} & Derived ordered target-model tokens & Contains the prompt tokens after the accepted cached prefix. These require prefill before decoding; without reuse, the engine processes the full prompt normally.\\
 \texttt{cache\_metadata} & Details describing the cache & Includes source/target model versions, transfer method, tokenizer and conversation-format versions, covered tokens and positions, data format, precision, sharing group, readiness and configuration version.\\
 \texttt{configuration} & Versioned settings record & Describes the server software, hardware, models, approved transfer setups, limits and reuse on/off setting.\\
 \texttt{output\_event} & Request ID, output order and token/text & Returns each piece of the response to the correct request.\\
@@ -649,8 +691,10 @@ and measurement files do not include the raw conversation or cache contents.
 \subsection{Product Boundary}
 Tandem covers text generation, exact checks for shared conversation history,
 use of tested caches, separation of requests, return to normal processing and
-repeatable evaluation on one server. The application supplies the models,
-routing decisions and conversation. A trusted provider supplies possible caches.
+repeatable evaluation on one server. The application supplies the conversation
+and generation settings; the operator configures the available models.
+vLLM Semantic Router selects the target model. The trusted engine-side cache
+component supplies source KV state and prepares candidate target-model caches.
 The baseline keeps the serving engine's existing prefix-cache features.
 
 The project does not include training base models, inventing a new cache
@@ -719,7 +763,7 @@ Tandem shall check each request against the Data Dictionary before accepting it.
 
 \par\medskip\noindent\phantomsection\label{req:FR-02}
 \textbf{FR-02 --- Use the requested model and inputs}\par
-Tandem shall use the application's selected model version, complete ordered prompt and accepted response settings.\par
+Tandem shall use the router-selected model version, complete ordered prompt and accepted generation settings.\par
 \textbf{Fit criterion.} T-SEM compares the model version, formatted prompt and applied settings with the same request run normally. No history or instruction is left out.\par
 \textbf{Source and rationale.} BR1; an optimization must not change what the application asked the model to do.
 
@@ -1182,9 +1226,11 @@ Each tested release shall provide the software/hardware record and commands need
 \subsection{Requirements for Interfacing with Adjacent Systems}
 The Data Dictionary and
 \hyperref[req:FR-01]{\texttt{FR-01}}--\hyperref[req:FR-08]{\texttt{FR-08}}
-define what applications send and receive. The cache provider uses a documented
-connection to the serving engine and supplies the cache's source, intended
-model and format. Supported response settings are listed by version. The host
+define the logical inputs and outputs. vLLM Semantic Router supplies the
+target-model decision. The engine-side cache interface supplies the source
+cache handle, prepared candidate cache and compatibility metadata; the
+uncached suffix is derived from the validated prefix. Supported generation
+settings are listed by version. The host
 application checks user identity and assigns sharing permissions.
 
 \subsection{Productization Requirements}
