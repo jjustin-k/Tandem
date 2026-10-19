@@ -1195,14 +1195,11 @@ when measured directly; it is not guessed from the number of avoided tokens.
 
 
 \subsection{Appearance Requirements}
-Tandem does not provide a graphical interface. Users see command-line
-messages, logs and test reports. These outputs need clear labels and units.
+\textbf{Not Applicable.} Tandem is an inference-engine component with no
+graphical user interface, so it has no requirements for screen layouts,
+colours or visual branding. Readable reports and messages are covered under
+Understandability and Politeness Requirements.
 
-\par\medskip\noindent\phantomsection\label{req:NFR-01}
-\textbf{NFR-01 --- Make results readable}\par
-Tandem shall give human-readable results clear field names and units as well as providing structured data for other programs.\par
-\textbf{Fit criterion.} T-REPORT checks that a reader can distinguish reused, normal and fallback processing, understand units and identify failures without examining engine internals.\par
-\textbf{Source and rationale.} Developers and operators need to understand the results.
 
 \subsection{Style Requirements}
 Messages use the same terms as the glossary and include a defined status
@@ -1225,16 +1222,12 @@ A technical user with the listed prerequisites shall be able to install Tandem a
 \textbf{Source and rationale.} Operators need a repeatable setup process.
 
 \subsection{Personalization and Internationalization Requirements}
-The first version does not need personalized controls or translated
-administrative messages. It must preserve supported text, including Unicode
-characters, through the selected model's usual tokenizer and conversation
-format. Tandem must not rewrite text to make two histories appear to match.
+\textbf{Not Applicable.} The initial prototype has no personalized user
+interface or requirement to translate its administrative messages. Preserving
+Unicode prompts is still required under
+\hyperref[req:NFR-03]{\texttt{NFR-03}}; this does not require Tandem to
+translate or personalize the conversation.
 
-\par\medskip\noindent\phantomsection\label{req:NFR-03}
-\textbf{NFR-03 --- Preserve supported text}\par
-Tandem shall preserve valid Unicode input through the selected model's normal conversation formatting and tokenization.\par
-\textbf{Fit criterion.} T-TEXT checks accented characters, non-Latin scripts, whitespace and delimiters. The prompt tokens match normal processing, with no extra text changes introduced by Tandem.\par
-\textbf{Source and rationale.} C4; text differences must not lead to false history matches.
 
 \subsection{Learning Requirements}
 The guide explains what cache reuse does, which setups are supported and
@@ -1249,6 +1242,13 @@ cannot be used but the request can still run normally, the message says so.
 The documentation distinguishes a model that can load from a model/cache setup
 that has passed reuse tests. Messages identify invalid fields without repeating
 private conversation text.
+
+\par\medskip\noindent\phantomsection\label{req:NFR-01}
+\textbf{NFR-01 --- Make results readable}\par
+Tandem shall give human-readable results clear field names and units as well as providing structured data for other programs.\par
+\textbf{Fit criterion.} T-REPORT checks that a reader can distinguish reused, normal and fallback processing, understand units and identify failures without examining engine internals.\par
+\textbf{Source and rationale.} Developers and operators need to understand the results.
+
 
 \subsection{Accessibility Requirements}
 Commands and reports use readable text and do not depend on colour.
@@ -1295,12 +1295,11 @@ On at least one model-switch test chosen in advance, the tested integration shal
 \textbf{Source and rationale.} G1, G2, G4; the project must demonstrate a measured benefit rather than assume a fixed speedup.
 
 \subsection{Safety-Critical Requirements}
-The prototype is not intended to control a safety-critical system. Relevant
-harms still include incorrect responses, disclosure of private information,
-unavailable service and wasted resources. The security requirements in
-Section~\ref{sec:security} apply even when their checks reduce the possible
-speed improvement. The Hazard Analysis will review the risks linked to those
-requirements.
+\textbf{Not Applicable.} Tandem is not intended to control a safety-critical
+system. Incorrect predictions, privacy breaches, service failures and wasted
+GPU resources still require analysis in the Hazard Report and the applicable
+accuracy, robustness and security requirements.
+
 
 \subsection{Precision or Accuracy Requirements}
 Accuracy has two parts: how closely predicted KV tensors approximate native
@@ -1326,6 +1325,13 @@ accuracy on every new prompt.
 Each supported cache-reuse setup shall meet the score-difference and generated-token checks in Section~\ref{sec:formal} for its declared test set.\par
 \textbf{Fit criterion.} T-SCORE checks corresponding scores using \texttt{SCORE\_ATOL} and \texttt{SCORE\_RTOL}. T-GEN requires the same greedy tokens for \texttt{CHECK\_TOKENS}, or until both runs stop earlier. A mismatch prevents approval; limits cannot be changed afterwards just to pass.\par
 \textbf{Source and rationale.} BR1, BR6; the listed tolerances are proposed values the team still needs to review.
+
+\par\medskip\noindent\phantomsection\label{req:NFR-03}
+\textbf{NFR-03 --- Preserve supported text}\par
+Tandem shall preserve valid Unicode input through the selected model's normal conversation formatting and tokenization.\par
+\textbf{Fit criterion.} T-TEXT checks accented characters, non-Latin scripts, whitespace and delimiters. The prompt tokens match normal processing, with no extra text changes introduced by Tandem.\par
+\textbf{Source and rationale.} C4; text differences must not lead to false history matches.
+
 
 \subsection{Robustness or Fault-Tolerance Requirements}
 When an optional cache cannot be used, a valid request should still be able
@@ -1381,10 +1387,11 @@ tested before it is listed as supported.
 
 
 \subsection{Expected Physical Environment}
-Tandem runs on a normally maintained laboratory or server-room computer.
-The host organization supplies power, cooling, storage and hardware maintenance.
-No extra sensors or physical equipment are required. Tandem reports hardware
-or system failures that the serving engine can detect.
+\textbf{Not Applicable.} Tandem has no special physical-environment
+requirements, sensors or dedicated hardware enclosure. Its server, GPU and
+software requirements are covered by the implementation and test environment
+sections.
+
 
 \subsection{Wider Environment Requirements}
 The main test environment is Linux with the selected GPU software and model
@@ -1559,11 +1566,11 @@ Tandem shall never present output from a failed reuse attempt followed by output
 
 
 \subsection{Cultural Requirements}
-The administrative interface uses neutral technical language. Reports state
-which languages and types of conversation were tested, so readers do not assume
-the results apply to every language or user group. Tandem preserves the selected
-model's output; changing its cultural behaviour or personalizing its answers
-is outside this cache-reuse project.
+\textbf{Not Applicable.} Tandem has no culture-specific interface or
+content-customization features. It predicts KV state; it does not define the
+base model's cultural behaviour. Prediction error and effects on model output
+remain covered by the accuracy requirements.
+
 
 \section{Compliance Requirements}
 
@@ -1617,10 +1624,10 @@ work, but the combined system still needs the required output, privacy and
 failure-handling tests.
 
 \subsection{Products That Can Be Copied}
-The project will extend existing serving software rather than copy a whole
-application. Examples and extension code may be adapted when their licences
-allow it, with credit and required notices retained. Results published by
-another project provide background; they are not measurements of Tandem.
+\textbf{Not Applicable.} No complete existing product has been selected for
+copying. Existing libraries and serving-engine components are covered under
+Reusable Components.
+
 
 \section{New Problems}
 
@@ -1700,14 +1707,13 @@ behaviour, the operator turns reuse off or restores the recorded unmodified
 engine version. The application keeps its existing routing and conversation storage.
 
 \subsection{Data That Has to be Modified or Translated for the New System}
-No application database needs to be converted. Existing caches are not
-assumed to work across models or software versions. The trusted source-cache
-component supplies KV state with its model and prefix metadata. Tandem's
-versioned predictor estimates target KV state and checks its runtime
-compatibility before loading it.
-References to old caches become invalid after a restart or incompatible
-configuration change. Measurement files record their format version so that
-analysis tools can detect an incompatible file.
+\textbf{Not Applicable.} Adopting Tandem does not require converting an
+existing application database or stored conversation records. Predicting
+target KV state from source KV state is runtime functionality, specified in
+\hyperref[req:FR-16]{\texttt{FR-16}}, rather than a one-time data-migration task.
+Cache invalidation after incompatible configuration changes remains covered
+by \hyperref[req:FR-13]{\texttt{FR-13}}.
+
 
 \section{Costs}
 Expected costs are predictor development and any training, paired KV data
@@ -1758,17 +1764,20 @@ The release shall document prerequisites, supported setups, request/response fie
 \textbf{Fit criterion.} T-DOC checks these topics and asks an independent technical reviewer to run the example under \hyperref[req:NFR-02]{\texttt{NFR-02}}. Supported limits and known problems are explicit.\par
 \textbf{Source and rationale.} Application developers, operators and maintainers need usable instructions.
 
-\subsection{Training Requirements}
-Users do not need a formal training course. A short walkthrough uses public
-or made-up text to show a normal request, successful reuse, a cache that cannot
-be used, and a processing failure. It explains the results and the next steps
-using ordinary command-line tools.
-
 \par\medskip\noindent\phantomsection\label{req:DR-02}
 \textbf{DR-02 --- Explain test results}\par
 The release shall explain how to repeat and interpret the normal-processing/Tandem comparison, including starting cache conditions, uncertainty, failures and output tolerances.\par
 \textbf{Fit criterion.} T-DOC follows a sample report back to its settings and individual results. A failed or inconclusive result must be clearly distinguishable from a passed requirement.\par
 \textbf{Source and rationale.} G1--G4; readers need to understand both the results and their limits.
+
+
+\subsection{Training Requirements}
+\textbf{Not Applicable.} No formal user-training programme is required for
+the capstone prototype. Technical setup examples and guidance for interpreting
+results belong in the user documentation under
+\hyperref[req:DR-01]{\texttt{DR-01}} and
+\hyperref[req:DR-02]{\texttt{DR-02}}.
+
 
 \section{Waiting Room}
 Possible later features include more conversation branches, more model
