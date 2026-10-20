@@ -72,7 +72,8 @@
     "docs/Comments.text",
     "docs/Common.text",
     "docs/HazardAnalysis/HazardAnalysis.tex",
-    "docs/Reflection.text"
+    "docs/Reflection.text",
+    "refs/References.bib"
   ],
   "docs/ProblemStatementAndGoals/ProblemStatement.tex": [
     "docs/Comments.text",
@@ -90,7 +91,9 @@
     "docs/Common.text",
     "docs/Reflection.text",
     "docs/SRS-Volere/SRS.tex",
-    "docs/SRS_Reflection.text"
+    "docs/SRS-Volere/figures/Tandem Context Diagram.drawio.png",
+    "docs/SRS-Volere/figures/Tandem Use Case Diagram.drawio.png",
+    "docs/SRS-Volere/figures/TandemStateDiagram.drawio.png"
   ],
   "docs/SRS/SRS-FAQ.tex": [
     "docs/SRS/SRS-FAQ.tex"
