@@ -803,7 +803,7 @@ H6 exhausted resources; H7 mixed failed/restarted answers.
 \hyperref[req:NFR-04]{\texttt{NFR-04}}, \hyperref[req:NFR-07]{\texttt{NFR-07}}, \hyperref[req:NFR-08]{\texttt{NFR-08}} & G1, G2, G4 & T-PERF, T-LOAD, T-NATIVE-PERF with T-STAT.\\
 \hyperref[req:NFR-05]{\texttt{NFR-05}}, \hyperref[req:NFR-06]{\texttt{NFR-06}} & BR1, BR2, BR6 / H1, H3, H7 & T-SCORE, T-GEN, T-FAIL.\\
 \hyperref[req:NFR-09]{\texttt{NFR-09}}, \hyperref[req:NFR-10]{\texttt{NFR-10}} & Maintainer/operator needs & T-QUAL, T-REPRO.\\
-\hyperref[req:NFR-11]{\texttt{NFR-11}}, \hyperref[req:NFR-12]{\texttt{NFR-12}} & Maintainer/operator needs & T-MAINT, T-DIAG.\\
+\hyperref[req:NFR-12]{\texttt{NFR-12}} & Operator needs & T-DIAG.\\
 \hyperref[req:SR-01]{\texttt{SR-01}}, \hyperref[req:SR-04]{\texttt{SR-04}} & BR3 / H2 & T-ISOLATION\\
 \hyperref[req:SR-02]{\texttt{SR-02}}, \hyperref[req:SR-05]{\texttt{SR-05}} & C4, BR6 / H1, H3 & T-COMP, T-RESTART.\\
 \hyperref[req:SR-03]{\texttt{SR-03}} & G2, G4 / H4 & T-LIFE.\\
@@ -829,7 +829,7 @@ work and directly measured memory.
 
 
 \subsection{Appearance Requirements}
-\textbf{Not Applicable.} Tandem has no graphical user interface.
+\textbf{Not Applicable.}
 
 
 \subsection{Style Requirements}
@@ -850,9 +850,7 @@ A technical user meeting prerequisites shall install Tandem and run the basic ex
 \textbf{Source and rationale.} Operators need repeatable setup.
 
 \subsection{Personalization and Internationalization Requirements}
-\textbf{Not Applicable.} No personalized or translated administrative interface
-is planned; Unicode preservation remains required by
-\hyperref[req:NFR-03]{\texttt{NFR-03}}.
+\textbf{Not Applicable.}
 
 
 \subsection{Learning Requirements}
@@ -903,8 +901,7 @@ On at least one preselected model-switch workload, Tandem shall reduce computed 
 \textbf{Source and rationale.} G1, G2, G4; demonstrate measured benefit.
 
 \subsection{Safety-Critical Requirements}
-\textbf{Not Applicable.} Tandem does not control safety-critical equipment;
-software, privacy and resource risks remain subject to the Hazard Analysis.
+\textbf{Not Applicable.}
 
 
 \subsection{Precision or Accuracy Requirements}
@@ -969,8 +966,7 @@ code/test records, and qualify model or dependency updates before claiming suppo
 
 
 \subsection{Expected Physical Environment}
-\textbf{Not Applicable.} Tandem needs no special physical enclosure, sensors
-or environmental controls beyond the supported server.
+\textbf{Not Applicable.}
 
 
 \subsection{Wider Environment Requirements}
@@ -990,8 +986,7 @@ application assigns user identity and sharing permissions.
 
 
 \subsection{Productization Requirements}
-Deliver an installable repository prototype with permitted model sources,
-a native-processing example and prediction enabled only for qualified setups.
+\textbf{Not Applicable.}
 
 
 \subsection{Release Requirements}
@@ -1003,13 +998,8 @@ results; failed or untested combinations remain experimental or disabled.
 
 
 \subsection{Maintenance Requirements}
-Support qualified model and engine updates without changing application request fields or native fallback.
+\textbf{Not Applicable.}
 
-\par\medskip\noindent\phantomsection\label{req:NFR-11}
-\textbf{NFR-11 --- Add a setup without changing application inputs}\par
-Maintainers shall extend an existing prediction method to another setup without changing application request fields or native fallback.\par
-\textbf{Fit criterion.} T-MAINT follows documented settings/integration changes and reruns API/native tests. New predictor development/training remains separate, in-scope work.\par
-\textbf{Source and rationale.} Keep model support changes transparent to applications.
 
 \subsection{Supportability Requirements}
 Use repository issues with version details, error codes and non-private reproduction steps; no support response time is promised.
@@ -1021,24 +1011,14 @@ The release shall explain rejection/fallback/failure codes and operator actions,
 \textbf{Source and rationale.} BR2, BR4; distinguish unused caches from failed requests.
 
 \subsection{Adaptability Requirements}
-Qualify new model/GPU/software combinations; document cache interfaces for
-future providers/engines, without requiring a second engine in this release.
+\textbf{Not Applicable.}
 
-\par\medskip\noindent\textbf{Likely and unlikely changes.}
-LC1: New model pairs need editable configuration/tests.
-LC2: Engine cache/interface changes need an identifiable integration boundary.
-LC3: New workloads/hardware need comparable test records.
-LC4: Preapproval threshold revisions need versioned values/reasons.
-UC1: Base-LLM training and routing remain external.
-UC2: Initial execution remains on one server.
-UC3: Reuse retains exact-prefix and permission checks, not semantic similarity.
 
 \section{Security Requirements}
 
 \subsection{Access Requirements}
 \label{sec:security}
-\textbf{Not Applicable.} User authentication, accounts and server access are
-managed by the host system; cache-sharing restrictions are covered under Privacy.
+\textbf{Not Applicable.}
 
 \subsection{Integrity Requirements}
 Use only complete, current caches and protect state needed by active requests.
@@ -1084,20 +1064,16 @@ Normal logs/measurements shall retain IDs/reasons but omit raw prompts, answers,
 \textbf{Source and rationale.} BR3 / H5; minimize sensitive records.
 
 \subsection{Audit Requirements}
-\textbf{Not Applicable.} No separate security audit trail is required;
-operational measurements are covered by \hyperref[req:FR-10]{\texttt{FR-10}}.
+\textbf{Not Applicable.}
 
 \subsection{Immunity Requirements}
-\textbf{Not Applicable.} Operating-system, network and malware protection
-are provided by the host environment; input/cache validation remains required
-under \hyperref[req:FR-01]{\texttt{FR-01}} and
-\hyperref[req:FR-04]{\texttt{FR-04}}.
+\textbf{Not Applicable.}
 
 \section{Cultural Requirements}
 
 
 \subsection{Cultural Requirements}
-\textbf{Not Applicable.} Tandem adds no culture-specific interface or content features.
+\textbf{Not Applicable.}
 
 
 \section{Compliance Requirements}
@@ -1146,7 +1122,7 @@ then validate the combined system for accuracy, privacy and failure handling.
 
 
 \subsection{Products That Can Be Copied}
-\textbf{Not Applicable.} No complete product will be copied; reusable components are listed above.
+\textbf{Not Applicable.}
 
 
 \section{New Problems}
@@ -1213,9 +1189,7 @@ rollback by disabling prediction or restoring the recorded engine version.
 
 
 \subsection{Data That Has to be Modified or Translated for the New System}
-\textbf{Not Applicable.} Application data needs no migration; KV prediction
-occurs at runtime, with incompatible caches invalidated under
-\hyperref[req:FR-13]{\texttt{FR-13}}.
+\textbf{Not Applicable.}
 
 
 \section{Costs}
@@ -1253,11 +1227,11 @@ The release shall explain reproducing/interpreting native--Tandem tests, includi
 
 
 \subsection{Training Requirements}
-\textbf{Not Applicable.} Setup and troubleshooting guidance is provided in the user documentation.
+\textbf{Not Applicable.}
 
 
 \section{Waiting Room}
-Future work may include more model families, conversation branches, GPUs, lower memory use and another serving engine; multi-server execution, semantic-prefix reuse, router development and a public application require new scope.
+Future work may include adding model/predictor setups without changing application request fields, more model families, conversation branches, GPUs, lower memory use and another serving engine; multi-server execution, semantic-prefix reuse, router development and a public application require new scope.
 
 
 \section{Ideas for Solution}
@@ -1269,6 +1243,15 @@ and loading so only the uncached suffix requires target prefill; retain
 native fallback and evaluate KV error, output effects and total serving cost.
 Tree-attention and KV-Promise features from the older plan are not required.
 
+
+\par\medskip\noindent\textbf{Likely and unlikely changes.}
+LC1: New model pairs need editable configuration/tests.
+LC2: Engine cache/interface changes need an identifiable integration boundary.
+LC3: New workloads/hardware need comparable test records.
+LC4: Preapproval threshold revisions need versioned values/reasons.
+UC1: Base-LLM training and routing remain external.
+UC2: Initial execution remains on one server.
+UC3: Reuse retains exact-prefix and permission checks, not semantic similarity.
 
 \section{Appendix --- Generative AI Use Disclosure}
 
