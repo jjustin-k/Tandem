@@ -52,6 +52,7 @@ Oct 18, 2026 & 0.1 & Draft requirements for the current Tandem scope.\\
 Oct 19, 2026 & 0.2 & Make source-to-target KV cache prediction central to the scope, requirements, evaluation and workflow diagram.\\
 Oct 19, 2026 & 0.3 & Shorten supporting sections and requirements; mark host-provided security features not applicable and consolidate duplicate checks.\\
 Oct 20, 2026 & 0.4 & Present functional and quality requirements as bullet points; replace most mathematical notation with plain-language checks.\\
+Oct 20, 2026 & 0.5 & Remove the traceability matrix and draft test-settings table; replace remaining setting references with plain-language limits.\\
 \bottomrule
 \end{tabularx}
 
@@ -67,7 +68,7 @@ source model's KV cache to avoid repeating prefill for shared conversation
 history after a model switch. The intended benefits are lower GPU compute,
 serving cost and time to first token (TTFT).
 
-vLLM Semantic Router selects the target model~\hyperref[src:VSR]{[VSR]}.
+vLLM Semantic Router selects the target model.
 Tandem validates and loads the prediction; the engine prefills the uncached
 suffix and decodes. Unsupported or failed predictions use native processing.
 The project includes predictor development, any fitting/training, paired KV
@@ -76,7 +77,7 @@ Accuracy and end-to-end benefits remain to be demonstrated.
 
 
 \subsection{Goals of the Project}
-Tandem addresses repeated prefill after model switches~\hyperref[src:PS]{[PS]}:
+Tandem addresses repeated prefill after model switches:
 \begin{description}
 \item[G1: Predict target KV from source KV.] Develop and integrate a predictor
 that lets supported target models reuse the shared history without repeating
@@ -99,14 +100,14 @@ and native fallback remain required.
 
 \subsection{Client}
 A potential client is a multi-model application company such as
-Cursor~\hyperref[src:CURSOR]{[CURSOR]}, whose team could help identify useful
+Cursor, whose team could help identify useful
 model combinations, acceptable response delays and cost-saving goals; this
 is a proposed adoption scenario, not a confirmed partnership.
 
 
 \subsection{Customer}
 A potential customer is an inference provider such as
-Together AI~\hyperref[src:TOGETHER]{[TOGETHER]} or an internal AI infrastructure
+Together AI or an internal AI infrastructure
 team that could deploy Tandem to serve more requests with its GPUs; adoption
 of the planned open-source software does not require a licence purchase.
 
@@ -136,7 +137,7 @@ company-supplied requirements; Alex Morgan and Sofia Nguyen are fictional.
 
 \par\medskip\noindent\phantomsection\label{persona:cursor}
 \textbf{Cursor (AI Application Company).}
-Cursor offers multi-model AI development tools~\hyperref[src:CURSOR]{[CURSOR]}.
+Cursor offers multi-model AI development tools.
 In this scenario, coding conversations retain instructions, code and earlier
 responses across model switches. The application team wants cheaper model
 choices without repeated history prefill erasing the savings. Tandem would
@@ -146,7 +147,7 @@ measured benefits and native fallback.
 
 \par\medskip\noindent\phantomsection\label{persona:together}
 \textbf{Together AI (Inference Hosting Provider).}
-Together AI offers dedicated inference~\hyperref[src:TOGETHER]{[TOGETHER]}.
+Together AI offers dedicated inference.
 This scenario represents operators managing GPU capacity, queues and customer
 isolation. They would configure approved predictors, model pairs and limits,
 monitor reuse and failures, and disable prediction when needed. Adoption
@@ -207,20 +208,19 @@ model pair and KV prediction method that have passed the required tests.
 whenever reuse is not possible.
 \end{description}
 These limits keep the project manageable and allow a fair comparison with the
-serving engine running without Tandem~\hyperref[src:PS]{[PS]}.
+serving engine running without Tandem.
 
 \subsection{Implementation Environment of the Current System}
 Use a Linux GPU server with sufficient model memory, with vLLM as the planned
-engine and SGLang as an alternative~\hyperref[src:DP]{[DP]}; record exact model,
+engine and SGLang as an alternative; record exact model,
 tokenizer, engine and GPU-software versions before testing. CPU checks do not
 establish GPU performance, and the first model pair remains open (OI1--OI2).
 
 
 \subsection{Partner or Collaborative Applications}
 The application sends conversation messages and generation settings through
-the existing serving interface; vLLM Semantic Router selects the target
-\hyperref[src:VSR]{[VSR]}. The engine supplies source KV through an internal
-cache reference, not HTTP tensor uploads~\hyperref[src:VLLMAPI]{[VLLMAPI]}.
+the existing serving interface; vLLM Semantic Router selects the target. The engine supplies source KV through an internal
+cache reference, not HTTP tensor uploads.
 Tandem predicts and validates target KV, loads accepted state and prefills the
 uncached suffix. The full prompt remains available for checks and fallback.
 Native target KV references are computed offline for development/evaluation,
@@ -319,50 +319,16 @@ per second, memory uses bytes and token counts are whole numbers.
 \item \textbf{Fact 1:} Tandem addresses repeated prefill after model switches
 by predicting target-model KV state from source-model KV state. The earlier
 problem statement describes the model-switching problem; its integration-only
-scope needs updating to include predictor development~\hyperref[src:PS]{[PS]}.
+scope needs updating to include predictor development.
 \item \textbf{Fact 2:} vLLM already supports reusing previously processed shared prompt prefixes;
-this reduces prefill work rather than the work of generating new tokens~\hyperref[src:APC]{[APC]}.
+this reduces prefill work rather than the work of generating new tokens.
 \item \textbf{Fact 3:} A cache must match the intended model, conversation and calculation settings.
 Having the same size is not enough to show it can be reused correctly.
-\item \textbf{Fact 4:} Repeating model results requires controlled software and hardware settings~\hyperref[src:REPRO]{[REPRO]}.
+\item \textbf{Fact 4:} Repeating model results requires controlled software and hardware settings.
 \end{itemize}
 
 The supplied project files do not yet contain measured Tandem performance or
 evidence that a KV predictor meets its accuracy and performance criteria.
-
-\par\medskip\noindent\textbf{Reference sources.}
-\begin{description}
-\item[PS] \phantomsection\label{src:PS} Team 11. \emph{Problem Statement and Goals: Tandem}.
-Repository source \path{docs/ProblemStatementAndGoals/ProblemStatement.tex},
-revision history through October 14, 2026.
-\item[DP] \phantomsection\label{src:DP} Team 11. \emph{Development Plan: Tandem}.
-Repository source \path{docs/DevelopmentPlan/DevelopmentPlan.tex},
-revision history through September 28, 2026. Technical scope requires reconciliation.
-\item[CHECK] \phantomsection\label{src:CHECK} Spencer Smith. \emph{SRS Checklist}.
-Repository source \path{docs/Checklists/SRS-Checklist.tex}.
-\item[APC] \phantomsection\label{src:APC} vLLM contributors. \emph{Automatic Prefix Caching}.
-\url{https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/}.
-Accessed October 18, 2026.
-\item[REPRO] \phantomsection\label{src:REPRO} vLLM contributors. \emph{Reproducibility}.
-\url{https://docs.vllm.ai/en/latest/usage/reproducibility/}.
-Accessed October 18, 2026. The release manifest records the guidance applicable
-to the engine version actually evaluated.
-\item[VSR] \phantomsection\label{src:VSR} vLLM Semantic Router contributors.
-\emph{System Overview}.
-\url{https://github.com/vllm-project/semantic-router/blob/main/website/docs/overview/semantic-router-overview.md}.
-Accessed October 19, 2026.
-\item[VLLMAPI] \phantomsection\label{src:VLLMAPI} vLLM contributors.
-\emph{OpenAI-Compatible Server}.
-\url{https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/}.
-Accessed October 19, 2026.
-\item[CURSOR] \phantomsection\label{src:CURSOR} Cursor. \emph{Models \& Pricing}.
-\url{https://cursor.com/docs/models-and-pricing}.
-Accessed October 18, 2026.
-\item[TOGETHER] \phantomsection\label{src:TOGETHER} Together AI.
-\emph{Dedicated Model Inference}.
-\url{https://www.together.ai/dedicated-model-inference}.
-Accessed October 18, 2026.
-\end{description}
 
 \subsection{Business Rules}
 BR1: Preserve the router-selected target model, including during replay.
@@ -384,31 +350,6 @@ prefill; this is an unproven proof-of-concept question.
 A5: Permitted public/synthetic data supports paired KV development and held-out tests.
 A6: Competing GPU work can be controlled or recorded.
 Review affected requirements/test plans if assumptions fail.
-
-\par\medskip\noindent\textbf{Proposed test settings and limits.}
-\label{sec:constants}
-These draft values need approval before final tests; review accuracy limits
-on development data (OI3), record model/GPU-specific limits, and never adjust
-thresholds to rescue failed final tests.
-\begin{longtable}{@{}p{0.31\textwidth}p{0.18\textwidth}p{0.45\textwidth}@{}}
-\toprule Symbol & Draft value & Meaning / reason\\\midrule\endhead
-\texttt{SCORE\_ATOL} & $10^{-3}$ & Absolute logit tolerance; check native-run variation (OI3).\\
-\texttt{SCORE\_RTOL} & $10^{-3}$ & Relative logit tolerance; tokens must also match.\\
-\texttt{CHECK\_TOKENS} & 32 tokens & Output-check length, or earlier shared stop.\\
-\texttt{REGRESSION\_LIMIT} & 0.05 & Allowed slowdown; review with potential users (OI3).\\
-\texttt{PAIRED\_RUNS} & 10 pairs & Initial timed trials; add trials if uncertain.\\
-\texttt{WARMUP\_RUNS} & 3 runs & Untimed preparation; record cache effects.\\
-\texttt{CONFIDENCE} & 0.95 & Confidence level for paired results.\\
-\texttt{BOOTSTRAP\_DRAWS} & 2000 draws & Resample whole paired trials; record seed.\\
-\texttt{TAIL\_PERCENTILE} & 95 & Tail-delay percentile.\\
-\texttt{PROMPT\_GRID} & $\{256,1024,4096\}$ tokens & Test lengths; record text and unsupported lengths.\\
-\texttt{CONCURRENCY\_GRID} & $\{1,2,4,8\}$ & Simultaneous requests; record supported levels.\\
-\texttt{MAX\_OUTPUT} & 64 tokens & Test output cap, subject to model limits.\\
-\texttt{REQUEST\_TIMEOUT} & 120 seconds & Request time limit, not a latency promise.\\
-\texttt{RECOVERY\_LIMIT} & 1 restart & Native restart allowed only before output.\\
-\texttt{LIFECYCLE\_CYCLES} & 100 cycles & Repeated cleanup checks for leaked allocations.\\
-\bottomrule
-\end{longtable}
 
 \section{The Scope of the Work}
 
@@ -579,8 +520,9 @@ requirements describe its quality and performance. Each bullet states a
 requirement, how to check it, and why it matters. ``Shall'' means required.
 FR and NFR are requirement IDs. Names beginning with T identify planned tests;
 their detailed procedures belong in the Verification and Validation (V\&V)
-Plan. The traceability table links requirements to goals, constraints and risks.
-Test settings are listed in Section~\ref{sec:constants}.
+Plan. Draft accuracy and performance limits need team approval before final
+tests; review them on development data (OI3), without changing thresholds
+to rescue failed final tests.
 
 \begin{itemize}
 \item \phantomsection\label{req:FR-01}
@@ -628,7 +570,7 @@ Tandem shall retain native processing, including existing prefix caching, when r
 \item \phantomsection\label{req:FR-07}
 \textbf{FR-07 --- Recover from or report a prediction/reuse failure}\par
 Tandem shall use the recovery rules below when prediction, validation or cache loading fails.\par
-\textbf{Check.} T-FAIL injects predictor exceptions, invalid tensors/loading failures before output and execution failures afterwards. Only safe pre-output native restarts within \texttt{RECOVERY\_LIMIT} are allowed, retaining the request ID without duplicate output; otherwise report failure. Never combine failed-attempt and restarted output as one successful response.\par
+\textbf{Check.} T-FAIL injects predictor exceptions, invalid tensors/loading failures before output and execution failures afterwards. At most one safe native restart is allowed before output, retaining the request ID without duplicate output; otherwise report failure. Never combine failed-attempt and restarted output as one successful response.\par
 \textbf{Why.} Prevent retry loops and mixed answers.
 
 
@@ -642,7 +584,7 @@ Tandem shall return ordered output under the correct request ID and exactly one 
 \item \phantomsection\label{req:FR-09}
 \textbf{FR-09 --- Release memory when a request ends}\par
 Tandem shall release ended requests' resources while preserving cache state needed by active requests.\par
-\textbf{Check.} T-LIFE repeats completion, failure and cancellation for \texttt{LIFECYCLE\_CYCLES}; no ended request retains its allocation and active outputs remain correct. Policy-retained reusable caches are allowed.\par
+\textbf{Check.} T-LIFE repeats completion, failure and cancellation for 100 cycles; no ended request retains its allocation and active outputs remain correct. Policy-retained reusable caches are allowed.\par
 \textbf{Why.} Prevent leaks without discarding useful caches.
 
 
@@ -684,7 +626,7 @@ Tandem shall enable a setup only after recording KV prediction error and passing
 \item \phantomsection\label{req:FR-15}
 \textbf{FR-15 --- Stop cancelled or timed-out requests}\par
 Tandem shall support cancellation and enforce configured request timeouts.\par
-\textbf{Check.} T-CANCEL cancels queued and running requests and tests requests exceeding \texttt{REQUEST\_TIMEOUT}. Each stops safely, records the right reason and releases resources under \hyperref[req:FR-09]{\texttt{FR-09}}.\par
+\textbf{Check.} T-CANCEL cancels queued and running requests and tests requests exceeding the configured timeout (120 seconds by default). Each stops safely, records the right reason and releases resources under \hyperref[req:FR-09]{\texttt{FR-09}}.\par
 \textbf{Why.} Running GPU operations need safe stopping points.
 
 
@@ -723,7 +665,7 @@ or use native processing when reuse is unavailable. No prompt token is
 skipped or logically processed twice. Runtime checks do not prove prediction
 accuracy or require computing native target KV for comparison.
 \item \textbf{Failure handling:} Restart natively only before any output,
-from valid state, up to \texttt{RECOVERY\_LIMIT} times. Otherwise report failure;
+from valid state, at most once. Otherwise report failure;
 never append a restarted answer to partial output. Stop cancellations/timeouts
 safely and record exactly one final status: completed, failed or cancelled.
 \end{itemize}
@@ -737,46 +679,15 @@ norm, separately for keys and values. If the reference norm is zero, report
 absolute error and mark relative error undefined. Small KV error alone does
 not establish acceptable outputs.
 \item Compare corresponding logits (next-token scores) after identical prior
-tokens. The absolute difference must not exceed \texttt{SCORE\_ATOL} plus
-\texttt{SCORE\_RTOL} multiplied by the absolute native score. Apply token masks
+tokens. The draft limit on the absolute difference is 0.001 plus
+0.001 multiplied by the absolute native score. Apply token masks
 consistently; unexpected nonfinite values fail.
-\item Greedy decoding must return identical tokens for \texttt{CHECK\_TOKENS},
+\item Greedy decoding must return identical tokens for 32 tokens,
 or until both runs stop earlier. First verify native-run repeatability.
 Sampling settings need separate recorded qualification or native fallback;
-equal seeds alone do not guarantee matching outputs~\hyperref[src:REPRO]{[REPRO]}.
+equal seeds alone do not guarantee matching outputs.
 These checks apply to the declared test set/settings, not every possible prompt.
 \end{itemize}
-
-\par\medskip\noindent\textbf{Requirements traceability and validation.}
-\label{sec:trace}
-The matrix links requirements, their basis, draft risks and planned tests;
-detailed procedures belong in the V\&V Plan. Check risk IDs against the
-Hazard Analysis: H1 wrong prediction/output; H2 unauthorized sharing;
-H3 stale/incomplete cache; H4 active-cache mutation/eviction; H5 private logs;
-H6 exhausted resources; H7 mixed failed/restarted answers.
-
-\begin{longtable}{@{}p{0.21\textwidth}p{0.23\textwidth}p{0.50\textwidth}@{}}
-\toprule Requirements & Basis / risk & Planned test\\\midrule\endhead
-\hyperref[req:FR-01]{\texttt{FR-01}} & C4, BR1, BR2 / H1, H3, H6 & T-ADM, T-BOUND\\
-\hyperref[req:FR-02]{\texttt{FR-02}}, \hyperref[req:FR-03]{\texttt{FR-03}} & G1, G3, BR1, BR3 / H1, H2 & T-SEM, T-MATCH\\
-\hyperref[req:FR-04]{\texttt{FR-04}}, \hyperref[req:FR-05]{\texttt{FR-05}} & G1, G2, BR6 / H1, H3 & T-COMP, T-REUSE\\
-\hyperref[req:FR-06]{\texttt{FR-06}}, \hyperref[req:FR-07]{\texttt{FR-07}} & BR2 / H3, H7 & T-NATIVE, T-FAIL\\
-\hyperref[req:FR-08]{\texttt{FR-08}}, \hyperref[req:FR-09]{\texttt{FR-09}}, \hyperref[req:FR-15]{\texttt{FR-15}} & G2, G4, BR4 / H4, H6, H7 & T-STATE, T-LIFE, T-CANCEL\\
-\hyperref[req:FR-10]{\texttt{FR-10}}, \hyperref[req:FR-11]{\texttt{FR-11}}, \hyperref[req:FR-12]{\texttt{FR-12}} & G1--G4, BR5 & T-METRIC, T-EVAL, T-REPORT\\
-\hyperref[req:FR-13]{\texttt{FR-13}}, \hyperref[req:FR-14]{\texttt{FR-14}} & C4, C5, BR6 / H1, H3 & T-CONFIG, T-QUAL\\
-\hyperref[req:FR-16]{\texttt{FR-16}} & G1, G2 / H1, H3 & T-PRED, T-REUSE, T-SCORE, T-GEN\\
-\hyperref[req:NFR-01]{\texttt{NFR-01}}, \hyperref[req:NFR-02]{\texttt{NFR-02}}, \hyperref[req:NFR-03]{\texttt{NFR-03}} & User needs, C4 & T-REPORT, T-USABILITY, T-TEXT.\\
-\hyperref[req:NFR-04]{\texttt{NFR-04}}, \hyperref[req:NFR-07]{\texttt{NFR-07}}, \hyperref[req:NFR-08]{\texttt{NFR-08}} & G1, G2, G4 & T-PERF, T-LOAD, T-NATIVE-PERF with T-STAT.\\
-\hyperref[req:NFR-05]{\texttt{NFR-05}}, \hyperref[req:NFR-06]{\texttt{NFR-06}} & BR1, BR2, BR6 / H1, H3, H7 & T-SCORE, T-GEN, T-FAIL.\\
-\hyperref[req:NFR-09]{\texttt{NFR-09}}, \hyperref[req:NFR-10]{\texttt{NFR-10}} & Maintainer/operator needs & T-QUAL, T-REPRO.\\
-\hyperref[req:NFR-12]{\texttt{NFR-12}} & Operator needs & T-DIAG.\\
-\hyperref[req:SR-01]{\texttt{SR-01}}, \hyperref[req:SR-04]{\texttt{SR-04}} & BR3 / H2 & T-ISOLATION\\
-\hyperref[req:SR-02]{\texttt{SR-02}}, \hyperref[req:SR-05]{\texttt{SR-05}} & C4, BR6 / H1, H3 & T-COMP, T-RESTART.\\
-\hyperref[req:SR-03]{\texttt{SR-03}} & G2, G4 / H4 & T-LIFE.\\
-\hyperref[req:SR-06]{\texttt{SR-06}} & BR3 / H5 & T-PRIVACY.\\
-\hyperref[req:DR-01]{\texttt{DR-01}}, \hyperref[req:DR-02]{\texttt{DR-02}} & All direct users & T-DOC, T-USABILITY, T-REPORT.\\
-\bottomrule
-\end{longtable}
 
 Final tests use paired source/native-target KV for held-out conversations;
 no fitting or threshold tuning on final results. Cover declared limits,
@@ -785,7 +696,8 @@ accepted/missing/rejected predictions, concurrency and forced failures.
 Match prompts, routing, settings, arrivals and resource limits; record cache
 preparation/hits and explain differences.
 
-Use Section~\ref{sec:constants} warmups and alternating timed pairs; report
+Start with three untimed warmups and ten alternating timed pairs, adding
+trials if uncertainty is too large; record cache preparation and report
 skips, failures, uncertainty, slowdowns and negative results. Throughput counts
 successful completions from first arrival to last final status. TTFT is
 missing if no token returns; separately report end-to-end time, actual prompt
@@ -857,8 +769,8 @@ costs, and retain failures and cancellations.
 
 Compare median TTFT, p95 TTFT (the 95th-percentile wait) and successful
 requests per second against the native engine. T-STAT estimates confidence
-intervals from complete paired trials using \texttt{CONFIDENCE} and
-\texttt{BOOTSTRAP\_DRAWS}; requests within one trial are not independent
+intervals at the draft 95\% confidence level using 2,000 bootstrap resamples
+of complete paired trials; record the random seed. Requests within one trial are not independent
 repetitions. Use the conservative interval bounds to decide whether an
 improvement or allowed slowdown has been demonstrated.
 
@@ -883,7 +795,7 @@ cannot prove accuracy, and output consistency does not prove factual correctness
 \item \phantomsection\label{req:NFR-05}
 \textbf{NFR-05 --- Keep the selected model's output consistent}\par
 Each approved setup shall pass the logit and generated-token checks in the KV prediction and reuse rules on its declared test set.\par
-\textbf{Check.} T-SCORE applies the absolute and relative logit tolerances in Section~\ref{sec:constants}. T-GEN requires identical greedy tokens for \texttt{CHECK\_TOKENS} or an earlier shared stop. Mismatches prevent approval; do not change limits after failed final tests.\par
+\textbf{Check.} T-SCORE applies the draft logit tolerances in the accuracy checks above. T-GEN requires identical greedy tokens for 32 tokens or an earlier shared stop. Mismatches prevent approval; do not change limits after failed final tests.\par
 \textbf{Why.} Draft tolerances need OI3 review.
 
 
@@ -913,14 +825,14 @@ Publish and test the supported prompt lengths, concurrency and memory limits for
 \item \phantomsection\label{req:NFR-07}
 \textbf{NFR-07 --- Handle more requests without excessive delay}\par
 On at least one preselected shared-history workload, Tandem shall improve throughput within the permitted p95 TTFT increase.\par
-\textbf{Check.} T-LOAD requires confidence intervals showing higher throughput and a p95 TTFT increase no greater than \texttt{REGRESSION\_LIMIT} of the native value, with no extra failures. Record requests and arrival times.\par
+\textbf{Check.} T-LOAD requires confidence intervals showing higher throughput and a p95 TTFT increase no greater than 5\% of the native value, with no extra failures. Record requests and arrival times.\par
 \textbf{Why.} Capacity gains must retain acceptable delay.
 
 
 \item \phantomsection\label{req:NFR-08}
 \textbf{NFR-08 --- Limit slowdowns for normal requests}\par
 For requests that do not use prediction, Tandem shall keep latency increases and throughput losses within the allowed limit.\par
-\textbf{Check.} T-NATIVE-PERF uses the conservative confidence-interval bounds: median and p95 TTFT may increase by at most \texttt{REGRESSION\_LIMIT} of their native values, and throughput may fall by at most the same fraction. Excess uncertainty is inconclusive.\par
+\textbf{Check.} T-NATIVE-PERF uses the conservative confidence-interval bounds: median and p95 TTFT may increase by at most 5\% of their native values, and throughput may fall by at most the same fraction. Excess uncertainty is inconclusive.\par
 \textbf{Why.} Bound integration overhead.
 \end{itemize}
 
@@ -1009,13 +921,13 @@ Use only complete, current caches and protect state needed by active requests.
 \textbf{SR-02 --- Do not use incomplete or incompatible caches}\par
 Tandem shall reject incomplete, inconsistent, outdated, unsupported or unqualified caches.\par
 \textbf{Fit criterion.} T-COMP varies each condition; rejected caches never enter generation. Use native processing or report server/resource failure; missing evidence means unsupported.\par
-\textbf{Source and rationale.} C4, BR6 / H1, H3; prevent invalid cache use.
+\textbf{Source and rationale.} C4, BR6; prevent invalid cache use.
 
 \par\medskip\noindent\phantomsection\label{req:SR-03}
 \textbf{SR-03 --- Protect caches still in use}\par
 Tandem shall protect active caches from invalidating removal, modification or reassignment.\par
 \textbf{Fit criterion.} T-LIFE overlaps generation, cancellation and cache replacement/eviction; outputs pass \hyperref[req:NFR-05]{\texttt{NFR-05}} and cleanup passes \hyperref[req:FR-09]{\texttt{FR-09}}.\par
-\textbf{Source and rationale.} G2, G4 / H4; preserve active state.
+\textbf{Source and rationale.} G2, G4; preserve active state.
 
 \subsection{Privacy Requirements}
 KV state can contain private information; restrict sharing and keep private
@@ -1025,25 +937,25 @@ content out of normal logs. Published tests use public or synthetic data.
 \textbf{SR-01 --- Allow only permitted history sharing}\par
 Tandem shall reuse history only with host-granted sharing permission.\par
 \textbf{Fit criterion.} T-ISOLATION uses matching histories across groups and request-controlled permission changes; unauthorized caches are neither used nor exposed.\par
-\textbf{Source and rationale.} BR3 / H2; protect private history.
+\textbf{Source and rationale.} BR3; protect private history.
 
 \par\medskip\noindent\phantomsection\label{req:SR-04}
 \textbf{SR-04 --- Keep private instructions and answers separate}\par
 Tandem shall exclude other requests' private instructions/answers from reused history.\par
 \textbf{Fit criterion.} T-ISOLATION varies another request's private instructions while fixing the current request; scores pass \hyperref[req:NFR-05]{\texttt{NFR-05}}, greedy tokens match and native controls pass.\par
-\textbf{Source and rationale.} BR3 / H2; shared history grants no access to later private text.
+\textbf{Source and rationale.} BR3; shared history grants no access to later private text.
 
 \par\medskip\noindent\phantomsection\label{req:SR-05}
 \textbf{SR-05 --- Invalidate old caches after restart or setup changes}\par
 The first release shall restrict caches to the serving lifetime and invalidate references after restart/incompatible configuration changes.\par
 \textbf{Fit criterion.} T-RESTART rejects old references; default exports contain no prompts/caches.\par
-\textbf{Source and rationale.} BR3 / H3; host handles physical GPU-memory erasure.
+\textbf{Source and rationale.} BR3; host handles physical GPU-memory erasure.
 
 \par\medskip\noindent\phantomsection\label{req:SR-06}
 \textbf{SR-06 --- Keep private contents out of normal logs}\par
 Normal logs/measurements shall retain IDs/reasons but omit raw prompts, answers, KV, credentials and request-controlled secrets.\par
 \textbf{Fit criterion.} T-PRIVACY checks exports for injected secrets. Detailed output traces require explicit enablement, public/synthetic data and a declared retention period.\par
-\textbf{Source and rationale.} BR3 / H5; minimize sensitive records.
+\textbf{Source and rationale.} BR3; minimize sensitive records.
 
 \subsection{Audit Requirements}
 \textbf{Not Applicable.}
@@ -1062,7 +974,7 @@ Normal logs/measurements shall retain IDs/reasons but omit raw prompts, answers,
 
 
 \subsection{Legal Requirements}
-Tandem uses the repository's MIT licence~\hyperref[src:DP]{[DP]}; retain
+Tandem uses the repository's MIT licence; retain
 model/data/dependency licence conditions, required notices and permissions,
 and leave deployment-specific privacy obligations to the adopting organization.
 
@@ -1082,7 +994,7 @@ OI2 & Choose exact software/model versions, calculation settings and GPU hardwar
 OI3 & Approve cache-error reporting, downstream output tolerances and acceptable slowdown for the chosen predictor. Review the strict draft output checks using development data and normal-run variation. & Before final held-out evaluation; do not adjust limits to rescue failed final tests.\\
 OI4 & Ask potential users or representatives for feedback and record which requirements it affects. & Before approving the SRS for submission.\\
 OI5 & Align the Problem Statement, Development Plan and Hazard Analysis with target-KV prediction from source KV, predictor development/training and engine integration. Keep base-LLM training and router development outside scope. & Before final technical task assignments and the proof-of-concept review.\\
-OI6 & Review H1--H7 in the Hazard Analysis and use consistent risk IDs in both documents. & During the SRS/Hazard Analysis review.\\
+OI6 & Review cache-related risks in the Hazard Analysis and keep assumptions and mitigations consistent with the SRS. & During the SRS/Hazard Analysis review.\\
 OI7 & Confirm GPU time, storage and permissions to use the chosen models and test data. & Before booking and running experiments.\\
 OI8 & Complete personal reflections, course details and the required disclosure from the team's actual records. & Before final submission.\\
 \bottomrule
@@ -1094,8 +1006,7 @@ Recording these decisions does not mean they have already been resolved.
 
 \subsection{Ready-Made Products}
 Use the serving engine's existing inference and prefix-caching features as
-the baseline, then evaluate Tandem's added benefit after model switches
-\hyperref[src:APC]{[APC]}.
+the baseline, then evaluate Tandem's added benefit after model switches.
 
 
 \subsection{Reusable Components}
