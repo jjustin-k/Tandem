@@ -651,22 +651,40 @@ remains enabled on the normal-processing path~\hyperref[src:APC]{[APC]}.
 \end{figure}
 
 \subsection{The Context of the Work}
-\begin{tabularx}{\textwidth}{@{}lX@{}}
-\toprule Outside system or user & Information exchanged with Tandem\\\midrule
-Application & Supplies conversation messages, request ID and generation settings. Receives output tokens and completion or error status.\\
-Semantic router & Selects the target model and routes the inference request. The planned deployment uses vLLM Semantic Router.\\
-Source cache component & Supplies the earlier model's KV tensors or cache handle, covered prefix and source-model metadata. Tandem predicts target KV state from this input.\\
-Server operator & Supplies supported settings and resource limits. Receives status information and error messages.\\
-Test driver & Sends repeatable requests at recorded times. Receives individual and summary measurements.\\
+This section explains where Tandem fits in a model-serving system. The
+\emph{source model} is the model used earlier in the conversation. The
+\emph{target model} is the model selected to answer the next turn. Tandem
+uses the source model's KV cache to predict the target model's KV cache for
+the conversation history they share.
+
+\begin{tabularx}{\textwidth}{@{}p{0.27\textwidth}X@{}}
+\toprule System or user & Role in the Tandem workflow\\\midrule
+Application & Sends the conversation history, new message and response settings through the existing serving interface. Receives generated text or an error.\\
+vLLM Semantic Router & Chooses the target model for the request. Tandem uses this choice when predicting the target KV cache.\\
+Inference engine's cache manager & Makes the source KV cache available to Tandem, together with the source model's identity and the part of the history that the cache covers. A cache handle is a reference used to locate these tensors in memory.\\
+Server operator & Configures the models, supported predictors and GPU resource limits. Checks status messages and investigates failures.\\
+Evaluation tools & Run repeatable tests. Compare predicted KV caches with native target KV caches, then measure response quality, latency, throughput and compute cost.\\
 \bottomrule
 \end{tabularx}
-Inside Tandem's scope are development and evaluation of the source-to-target
-KV predictor, preparation of reference data, predictor fitting or training
-when required, compatibility checks and serving-engine integration. The
-integration loads accepted predicted caches, prefills the remaining prompt
-and uses native decoding or fallback. Test tools measure prediction accuracy
-and end-to-end serving benefits. Developing the semantic router and training
-the base LLMs remain outside the project.
+
+The application does not need to put KV tensors in its normal request. The
+engine's cache manager provides access to the source KV state through the
+internal integration.
+
+The team's main task is to develop and test the KV predictor. This includes
+preparing paired source and target KV data, fitting or training the predictor
+if needed, and connecting it to the inference engine. During a request,
+Tandem predicts the target KV cache and checks that it can be loaded for the
+selected model and history. If those checks pass, the engine loads the
+prediction, prefills the prompt tokens after the cached history and generates
+the response. If prediction is unavailable or fails, the engine uses normal
+target-model processing.
+
+Tests check how accurate the predictions are and whether the complete
+workflow saves time and GPU compute after including predictor overhead.
+The team uses the existing semantic router to select models and keeps the
+base LLM weights fixed; developing the router and training the base LLMs
+are outside Tandem's scope.
 
 \subsection{Work Partitioning}
 The tables divide Tandem's work by the events it must respond to. Part I
@@ -812,12 +830,48 @@ PUC1 & A model switch has source KV state and a supported predictor & Predict ta
 PUC2 & A cache is missing or fails a check & Process the prompt normally and record why reuse was not used.\\
 PUC3 & Reuse fails during processing & Restart safely before output where possible; otherwise report the failure.\\
 PUC4 & An operator changes settings & Accept supported settings and reject inconsistent or unsupported ones.\\
-PUC5 & A researcher starts a comparison & Run matching requests with and without Tandem and produce a repeatable report.\\
+PUC5 & An operator or researcher starts a comparison & Run matching requests with and without Tandem and produce a repeatable report.\\
 PUC6 & A request is cancelled or times out & Report its final status and release memory no active request needs.\\
 \bottomrule
 \end{longtable}
 
 \subsection{Individual Product Use Cases (PUC's)}
+Figure~\ref{fig:product-use-cases} shows the independent goals of one actor:
+a Data Center Server Operator. The operator is outside Tandem's system
+boundary. Each oval names a useful action that the operator can perform;
+each solid line connects the operator to that action. Their placement does
+not specify an execution order.
+
+\begin{itemize}
+\item \textbf{Configure KV prediction settings:} register approved predictor
+versions and the model pairs they support, set resource limits and enable or
+disable prediction. The router's configuration defines available inference
+backends and routing policy; the router selects the target model for each
+request. The existing source KV cache identifies the source model. Tandem
+uses that source/target pair to find an approved predictor; it does not
+choose the target model.
+\item \textbf{Inspect prediction, fallback and error status:} use the
+recorded request results and diagnostic messages to investigate what happened.
+\item \textbf{Evaluate KV prediction accuracy and serving performance:}
+run controlled comparisons with native target-model processing to measure
+prediction error, output differences, latency and GPU use.
+\item \textbf{Review evaluation results and compute-cost estimates:}
+inspect saved reports, including their assumptions, failed cases and limits.
+\end{itemize}
+
+No \emph{include} or \emph{extend} relationship is needed between these
+independent goals. Predicting tensors, checking compatibility, loading KV
+state and falling back to native processing are internal behaviour described
+in the relevant scenarios below and in the state diagram. They are not
+separate operator goals in this diagram.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth,height=0.78\textheight,keepaspectratio]{figures/TandemUseCaseDiagram.png}
+\caption{Tandem use cases for a Data Center Server Operator: configure KV prediction, inspect status, evaluate accuracy and performance, and review results.}
+\label{fig:product-use-cases}
+\end{figure}
+
 \textbf{PUC1: Predict and use target KV state.} Check the request, source
 cache and selected target model. Run the supported predictor on the source
 keys and values to estimate target KV state for the shared history. Validate
@@ -839,9 +893,11 @@ append a newly restarted answer to the partial answer.
 for new requests. Keep untested model/cache combinations disabled. Do not reuse
 old state when its model or configuration version no longer matches.
 
-\textbf{PUC5: Compare performance.} Record the settings and test requests,
-check output consistency, then run repeated paired comparisons. Include failed
-requests in the report. A setup that fails output checks is not approved for reuse.
+\textbf{PUC5: Compare performance.} An operator or researcher records the
+settings and test requests, compares predicted KV state with native target
+KV references, checks output consistency and runs repeated paired serving
+comparisons. Include predictor overhead, fallback and failed requests in the
+report. A setup that fails output checks is not approved for reuse.
 
 \textbf{PUC6: Stop a request.} Record cancellation or timeout and release
 the request's claim on memory. Keep any shared state still needed by another
@@ -852,128 +908,153 @@ active request intact.
 
 \subsection{Functional Requirements}
 \label{sec:functional}
-These requirements describe what Tandem and its test tools must do. ``Shall''
-marks a required behaviour. The \emph{fit criterion} explains how that
-requirement will be checked. The source and rationale explain why it is needed.
-Names beginning with T- identify planned tests, not tests already completed.
+Functional requirements state what Tandem must do. For example, it must
+predict target-model KV caches from source-model KV caches, load accepted
+predictions and use normal processing when prediction cannot be used.
+``Shall'' means the behaviour is required. Each numbered requirement has a
+\emph{fit criterion}, meaning how we will check whether it passes, and a
+\emph{source and rationale}, meaning where it comes from and why it is needed.
+
+The short labels below are references used to organize this document. They
+are not additional AI techniques or features.
+\begin{longtable}{@{}p{0.25\textwidth}p{0.69\textwidth}@{}}
+\toprule Label & Meaning\\\midrule\endhead
+\texttt{FR-01} & Functional Requirement 1: a required system behaviour.\\
+\texttt{NFR-05} & Non-functional Requirement 5: a quality requirement, here concerning model-output consistency.\\
+\texttt{SR} / \texttt{DR} & Safety/security requirement / documentation requirement. The number identifies the particular requirement.\\
+\texttt{G1}--\texttt{G4} & Project Goals 1--4, listed in Goals of the Project.\\
+\texttt{C4} & Solution Constraint 4, listed in Solution Constraints.\\
+\texttt{BR1} & Business Rule 1, listed in Business Rules.\\
+\texttt{A4} & Assumption 4, listed in Assumptions.\\
+\texttt{H1}--\texttt{H7} & Draft hazard/risk labels, explained before the traceability table below.\\
+\texttt{T-ADM}, \texttt{T-PRED}, etc. & Proposed test identifiers. Their descriptive names appear in the fit criteria. These labels do not mean that test code exists or that testing has been completed.\\
+\bottomrule
+\end{longtable}
+
+The AI terms keep their usual meanings: \emph{KV} means key-value,
+\emph{LLM} means large language model, and \emph{GPU} means graphics processing
+unit. A request \emph{ID} is its unique identifier. \emph{TTFT} means time to
+first token. Names such as \texttt{RECOVERY\_LIMIT} identify the draft test
+settings in Section~\ref{sec:constants}; they are explained there rather
+than treated as new technical concepts.
 
 \par\medskip\noindent\phantomsection\label{req:FR-01}
 \textbf{FR-01 --- Check requests before processing}\par
 Tandem shall check each request against the Data Dictionary before accepting it.\par
-\textbf{Fit criterion.} T-ADM sends missing fields, unknown models, invalid settings, repeated request IDs and prompts that exceed the limits. Each is rejected with a clear reason before generation begins. A valid request without a cache is accepted.\par
-\textbf{Source and rationale.} BR1, BR2; a bad request and an unavailable cache are different situations.
+\textbf{Fit criterion.} Request validation test (T-ADM) sends missing fields, unknown models, invalid settings, repeated request IDs and prompts that exceed the limits. Each is rejected with a clear reason before generation begins. A valid request without a cache is accepted.\par
+\textbf{Source and rationale.} Business Rule 1, Business Rule 2; a bad request and an unavailable cache are different situations.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-02}
 \textbf{FR-02 --- Use the requested model and inputs}\par
 Tandem shall use the router-selected model version, complete ordered prompt and accepted generation settings.\par
-\textbf{Fit criterion.} T-SEM compares the model version, formatted prompt and applied settings with the same request run normally. No history or instruction is left out.\par
-\textbf{Source and rationale.} BR1; an optimization must not change what the application asked the model to do.
+\textbf{Fit criterion.} Model and prompt consistency test (T-SEM) compares the model version, formatted prompt and applied settings with the same request run normally. No history or instruction is left out.\par
+\textbf{Source and rationale.} Business Rule 1; an optimization must not change what the application asked the model to do.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-03}
 \textbf{FR-03 --- Match the shared history exactly}\par
 Tandem shall reuse only an exact matching start of the history after formatting and tokenizing it for the selected model.\par
-\textbf{Fit criterion.} T-MATCH changes a message, message order, system instruction, tokenizer or conversation-format version, or token position. Each relevant mismatch prevents that cache from being used. The latest user turn is still processed as new input.\par
-\textbf{Source and rationale.} C4; similar meaning or equal cache sizes do not establish an exact match.
+\textbf{Fit criterion.} Conversation-prefix matching test (T-MATCH) changes a message, message order, system instruction, tokenizer or conversation-format version, or token position. Each relevant mismatch prevents that cache from being used. The latest user turn is still processed as new input.\par
+\textbf{Source and rationale.} Solution Constraint 4; similar meaning or equal cache sizes do not establish an exact match.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-04}
 \textbf{FR-04 --- Validate a KV cache before reuse}\par
 Tandem shall use a predicted target KV cache only when all predictor-version, compatibility, prefix-matching, permission, readiness and resource checks in Section~\ref{sec:formal} pass, including tensor-shape and finite-value checks.\par
-\textbf{Fit criterion.} T-COMP makes each check fail separately, then tests a valid case. Missing evidence, unsupported predictor versions, invalid shapes or nonfinite predicted values prevent reuse. Runtime checks do not require computing the native target KV cache for comparison.\par
-\textbf{Source and rationale.} G1, C4, BR3, BR6; the cache must be suitable for this request, not merely available.
+\textbf{Fit criterion.} Cache compatibility test (T-COMP) makes each check fail separately, then tests a valid case. Missing evidence, unsupported predictor versions, invalid shapes or nonfinite predicted values prevent reuse. Runtime checks do not require computing the native target KV cache for comparison.\par
+\textbf{Source and rationale.} Project Goal 1, Solution Constraint 4, Business Rule 3, Business Rule 6; the cache must be suitable for this request, not merely available.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-05}
 \textbf{FR-05 --- Load predicted KV state and prefill the remaining prompt}\par
 Tandem shall load an accepted predicted KV cache into the serving engine for the selected target model, prefill the remaining prompt once in its original order, and continue decoding from that state.\par
-\textbf{Fit criterion.} T-REUSE checks the cached history, remaining-token positions and measured prompt work for a tested setup. Output checks meet \hyperref[req:NFR-05]{\texttt{NFR-05}}.\par
-\textbf{Source and rationale.} G1; the predictor's output must replace shared-prefix prefill in the target engine, not remain only an offline prediction.
+\textbf{Fit criterion.} Predicted-cache loading test (T-REUSE) checks the cached history, remaining-token positions and measured prompt work for a tested setup. Output checks meet the output-consistency requirement, \hyperref[req:NFR-05]{\texttt{NFR-05}}.\par
+\textbf{Source and rationale.} Project Goal 1; the predictor's output must replace shared-prefix prefill in the target engine, not remain only an offline prediction.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-06}
 \textbf{FR-06 --- Keep normal processing available}\par
 Tandem shall use normal model processing when reuse is off, unavailable or unsuitable, while keeping the engine's existing prefix-cache features.\par
-\textbf{Fit criterion.} T-NATIVE checks same-model requests, requests without shared history, missing caches and unsupported model pairs. They still use the correct model and meet the normal output rules.\par
-\textbf{Source and rationale.} C5, BR2; a valid request must not fail solely because Tandem cannot speed it up.
+\textbf{Fit criterion.} Native-processing fallback test (T-NATIVE) checks same-model requests, requests without shared history, missing caches and unsupported model pairs. They still use the correct model and meet the normal output rules.\par
+\textbf{Source and rationale.} Solution Constraint 5, Business Rule 2; a valid request must not fail solely because Tandem cannot speed it up.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-07}
 \textbf{FR-07 --- Recover from or report a prediction/reuse failure}\par
 Tandem shall follow the restart and failure rules in Section~\ref{sec:formal} if KV prediction, validation or loading fails.\par
-\textbf{Fit criterion.} T-FAIL forces predictor exceptions, invalid predicted tensors and cache-loading failures before output, plus execution failures after output begins. Before output, a restart uses valid normal-processing state at most \texttt{RECOVERY\_LIMIT} times. Otherwise, a failure is reported.\par
-\textbf{Source and rationale.} BR2, BR4; repeated retries or mixing two answers would hide what happened.
+\textbf{Fit criterion.} Failure-recovery test (T-FAIL) forces predictor exceptions, invalid predicted tensors and cache-loading failures before output, plus execution failures after output begins. Before output, a restart uses valid normal-processing state at most \texttt{RECOVERY\_LIMIT} times. Otherwise, a failure is reported.\par
+\textbf{Source and rationale.} Business Rule 2, Business Rule 4; repeated retries or mixing two answers would hide what happened.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-08}
 \textbf{FR-08 --- Keep output attached to the right request}\par
 Tandem shall return output in order with the correct request ID and record exactly one final status for each accepted request.\par
-\textbf{Fit criterion.} T-STATE runs overlapping requests, cancellations and failures. Output order remains correct, and each accepted request ends as completed, failed or cancelled. Rejected requests have separate records.\par
-\textbf{Source and rationale.} BR4; simultaneous requests and restarts must not duplicate or mix responses.
+\textbf{Fit criterion.} Request-status and output-order test (T-STATE) runs overlapping requests, cancellations and failures. Output order remains correct, and each accepted request ends as completed, failed or cancelled. Rejected requests have separate records.\par
+\textbf{Source and rationale.} Business Rule 4; simultaneous requests and restarts must not duplicate or mix responses.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-09}
 \textbf{FR-09 --- Release memory when a request ends}\par
 Tandem shall release resources held for a completed, failed or cancelled request without removing shared state another active request still needs.\par
-\textbf{Fit criterion.} T-LIFE repeats these cases for \texttt{LIFECYCLE\_CYCLES}. No finished request retains its own allocation, and other active requests keep producing correct results. The engine may retain reusable cache data under its normal policy.\par
-\textbf{Source and rationale.} G2, G4; unused request allocations are different from caches intentionally kept for reuse.
+\textbf{Fit criterion.} Memory-lifecycle test (T-LIFE) repeats these cases for \texttt{LIFECYCLE\_CYCLES}. No finished request retains its own allocation, and other active requests keep producing correct results. The engine may retain reusable cache data under its normal policy.\par
+\textbf{Source and rationale.} Project Goal 2, Project Goal 4; unused request allocations are different from caches intentionally kept for reuse.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-10}
 \textbf{FR-10 --- Record what happened for each request}\par
 Tandem shall record the run and request IDs, source and target models, predictor version, prediction time, final status, reuse decision and reason, other timings, and actual prompt-token work in a structured result.\par
-\textbf{Fit criterion.} T-METRIC checks the result format and compares measured counts with a short known prompt. An unavailable measurement is marked missing with a reason rather than replaced by an estimate.\par
-\textbf{Source and rationale.} G1--G4; users need to see both the saved work and the failures.
+\textbf{Fit criterion.} Measurement-record test (T-METRIC) checks the result format and compares measured counts with a short known prompt. An unavailable measurement is marked missing with a reason rather than replaced by an estimate.\par
+\textbf{Source and rationale.} Project Goals 1--4; users need to see both the saved work and the failures.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-11}
 \textbf{FR-11 --- Use matching requests for comparisons}\par
 The test tools shall run the same requests, model choices, arrival times and response settings with and without Tandem.\par
-\textbf{Fit criterion.} T-EVAL compares request contents and configuration records. Unexplained differences invalidate the comparison. Existing prefix caching remains enabled whenever it is enabled in the baseline.\par
-\textbf{Source and rationale.} G1--G4, BR5; weakening the comparison system would give a misleading benefit.
+\textbf{Fit criterion.} Matched-workload comparison test (T-EVAL) compares request contents and configuration records. Unexplained differences invalidate the comparison. Existing prefix caching remains enabled whenever it is enabled in the baseline.\par
+\textbf{Source and rationale.} Project Goals 1--4, Business Rule 5; weakening the comparison system would give a misleading benefit.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-12}
 \textbf{FR-12 --- Make comparison results repeatable}\par
 The test tools shall report KV prediction-error measurements, prediction time, response times, completed requests per second, prompt work, total allocated GPU time and GPU time per completed request, output differences, fallback results and settings for individual cases and the overall run. Any estimated serving cost shall include its rates and calculation.\par
-\textbf{Fit criterion.} T-REPORT checks the code and library versions, hardware, source/target models, predictor parameters or checkpoint, data splits, seeds, test requests, repetitions, starting cache conditions and failures. It includes prediction, cache validation and loading overhead; offline predictor development costs are reported separately. Cost estimates follow the Costs section. Without a price, report GPU time without claiming money savings.\par
-\textbf{Source and rationale.} G1--G4; a speed result needs enough information to be checked independently.
+\textbf{Fit criterion.} Report reproducibility test (T-REPORT) checks the code and library versions, hardware, source/target models, predictor parameters or checkpoint, data splits, seeds, test requests, repetitions, starting cache conditions and failures. It includes prediction, cache validation and loading overhead; offline predictor development costs are reported separately. Cost estimates follow the Costs section. Without a price, report GPU time without claiming money savings.\par
+\textbf{Source and rationale.} Project Goals 1--4; a speed result needs enough information to be checked independently.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-13}
 \textbf{FR-13 --- Control supported cache-reuse setups}\par
 Tandem shall check its settings, provide a prediction/reuse on/off control and keep a versioned list of tested source/target model pairs, predictor versions, parameter checkpoints and supported limits.\par
-\textbf{Fit criterion.} T-CONFIG rejects inconsistent settings, uses normal processing for untested combinations, and prevents incompatible old caches from being used after a model or configuration change.\par
-\textbf{Source and rationale.} C4, C5; loading a model successfully does not show that cache reuse works for it.
+\textbf{Fit criterion.} Configuration validation test (T-CONFIG) rejects inconsistent settings, uses normal processing for untested combinations, and prevents incompatible old caches from being used after a model or configuration change.\par
+\textbf{Source and rationale.} Solution Constraint 4, Solution Constraint 5; loading a model successfully does not show that cache reuse works for it.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-14}
 \textbf{FR-14 --- Test a setup before enabling reuse}\par
 The test tools shall keep KV prediction-error measurements and passing output, privacy and failure-handling results for each predictor/model-pair setup enabled for cross-model reuse.\par
-\textbf{Fit criterion.} T-QUAL tries to enable a setup with missing or failed evidence; reuse stays off. The record includes held-out evaluation, predictor and parameter versions, any training-data split, and tested limits. Predictor fitting and final evaluation use separate conversation groups when fitting is required.\par
-\textbf{Source and rationale.} C4, BR6, A4; prediction accuracy and downstream output checks must be evaluated before accepting a speed benefit.
+\textbf{Fit criterion.} Supported-setup approval test (T-QUAL) tries to enable a setup with missing or failed evidence; reuse stays off. The record includes held-out evaluation, predictor and parameter versions, any training-data split, and tested limits. Predictor fitting and final evaluation use separate conversation groups when fitting is required.\par
+\textbf{Source and rationale.} Solution Constraint 4, Business Rule 6, Assumption 4; prediction accuracy and downstream output checks must be evaluated before accepting a speed benefit.
 
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-15}
 \textbf{FR-15 --- Stop cancelled or timed-out requests}\par
 Tandem shall accept cancellation and enforce the configured time limit for an accepted request.\par
-\textbf{Fit criterion.} T-CANCEL stops queued and running requests and lets a request exceed \texttt{REQUEST\_TIMEOUT}. Each ends with the right reason at a point the engine can safely stop, and releases resources under \hyperref[req:FR-09]{\texttt{FR-09}}.\par
-\textbf{Source and rationale.} G2, G4; an ongoing GPU operation may need to reach a safe stopping point first.
+\textbf{Fit criterion.} Cancellation and timeout test (T-CANCEL) stops queued and running requests and lets a request exceed \texttt{REQUEST\_TIMEOUT}. Each ends with the right reason at a point the engine can safely stop, and releases resources under \hyperref[req:FR-09]{\texttt{FR-09}}.\par
+\textbf{Source and rationale.} Project Goal 2, Project Goal 4; an ongoing GPU operation may need to reach a safe stopping point first.
 
 
 \par\medskip\noindent\phantomsection\label{req:FR-16}
@@ -983,7 +1064,7 @@ the target model's key and value tensors for a declared conversation prefix
 from the source model's KV tensors and recorded alignment metadata. The
 prediction path shall not construct those estimates by running native target
 prefill over the same shared prefix.\par
-\textbf{Fit criterion.} T-PRED runs the predictor on held-out conversations,
+\textbf{Fit criterion.} Target-KV prediction test (T-PRED) runs the predictor on evaluation conversations that were not used to fit it,
 checks the covered prefix, tensor layout and model-pair metadata, and reports
 key/value error against offline native target KV references for each declared
 layer or cache group. Instrumentation confirms that shared-prefix target
@@ -991,15 +1072,17 @@ prefill is skipped on the successful prediction path. The resulting cache is
 tested through \hyperref[req:FR-05]{\texttt{FR-05}} and
 \hyperref[req:NFR-05]{\texttt{NFR-05}}. Prediction architecture, parameter
 versions and any fitting procedure are recorded.\par
-\textbf{Source and rationale.} G1, G2; predicting the target attention state
+\textbf{Source and rationale.} Project Goal 1, Project Goal 2; predicting the target attention state
 from the source attention state is Tandem's central function.
 
 \par\medskip\noindent\textbf{Formal specification of KV prediction, cache reuse and failure behaviour.}
 \label{sec:formal}
-These rules define the predictor's input/output, when its cache may be used and what happens if reuse
-fails. They are written mathematically because a mistake here could produce
-an incorrect response or use another request's private history. The equations
-make the prose requirements precise; they do not prescribe the internal code.
+These rules express the preceding requirements mathematically: predict the
+target KV state from source KV state, use it only after the required checks,
+and use normal processing or report failure when prediction cannot be used.
+The letters in these equations are mathematical variables, defined alongside
+the formulas; they are different from the numbered document labels above.
+The equations make the requirements precise without prescribing internal code.
 
 For a source model $s$, target model $t$ and shared history $H$, define
 \[
@@ -1124,8 +1207,10 @@ mathematical proof that every possible prompt will behave identically.
 \label{sec:trace}
 This table connects each requirement to its goals or supporting rules, related
 risk and planned test. G1--G4 are the project goals; C and BR refer to the
-constraints and business rules. T- names identify tests to be described in
-the V\&V Plan; they do not mean the tests have already run.
+constraints and business rules, as explained in the label key at the start
+of this section. T- labels identify proposed tests to be described in the
+Verification and Validation (V\&V) Plan; they do not mean the tests have run.
+The fit criteria above give the full test names for the functional requirements.
 
 The draft risk labels are H1: inaccurate or incompatible predicted KV state
 changes the response beyond the allowed limits;
