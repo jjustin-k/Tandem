@@ -308,9 +308,10 @@ F4 & KV cache predictor & A tested, compatible predicted cache lowers
 answer quality & Plausible but wrong answers, worst when predicting a
 larger model from a smaller one & Approximate prediction; conversation
 unlike the fitting data & Held-out prediction error and output tests
-(T-PRED, T-QUAL); run-time check on sample positions & Approve each setup
-only within a quality-loss limit; check sample positions at run time and
-fall back when they disagree & SR-09, SR-10, FR-14, FR-16 & H8\\
+(T-PRED, T-QUAL); run-time check on the last history tokens & Approve
+each setup only within a quality-loss limit; at run time, recompute the
+last few history tokens on top of the predicted cache and fall back when
+they disagree & SR-09, SR-10, FR-14, FR-16 & H8\\
 F5 & KV cache predictor & Predicted cache is corrupted before loading &
 Steered or wrong answer & Storage error; software fault; untrusted source
 in a future release & Integrity check fails & Record a checksum and the
@@ -319,8 +320,8 @@ H9\\
 F6 & KV cache predictor & Tokens, layers or heads aligned wrongly between
 source and target & Keys and values placed at the wrong positions; garbled
 answer & Tokenizers split text differently; alignment rules not updated
-for a new model pair & Alignment checks in T-PRED; run-time check on
-sample positions & Record alignment with each cache; reject a cache whose
+for a new model pair & Alignment checks in T-PRED; run-time check on the
+last history tokens & Record alignment with each cache; reject a cache whose
 alignment does not match the configured rules & FR-16, SR-02, SR-10 & H1,
 H8\\
 F7 & KV cache predictor & Produces invalid tensors (wrong shape,
@@ -355,9 +356,10 @@ unsupported-pair tests (T-NATIVE) & Fall back on any failed check; keep the
 normal path always available & FR-06, NFR-06 & H1, H6\\
 F14 & Native prefill fallback & Many requests fall back at the same time &
 Delay spike and timeouts for all requests & A configuration change or
-predictor fault invalidates many caches at once & Fallback-rate metric &
-Limit concurrent fallbacks; turn reuse off when the fallback rate exceeds a
-limit & SR-13 & H14\\
+predictor fault invalidates many caches at once & Fallback-rate and queue
+metrics & Admit prefills only within the engine's budget; queue a bounded
+number and reject the rest with a retry status; turn reuse off when the
+fallback rate exceeds a limit & SR-13, NFR-08 & H14\\
 F15 & KV cache predictor & Predicted caches are never used & Memory
 pressure, evictions and wasted GPU time & Cache predicted for a model the
 router did not select & Memory and prediction metrics & Cap the memory for
@@ -409,11 +411,17 @@ Table~\ref{tab:constants}.
   prefill. \emph{Fit criterion:} T-QUAL compares both runs on the same test
   set; a setup above the limit stays disabled.
   \item[SR-10 --- Check predicted caches at run time (H8)] For each reuse,
-  \progname{} shall natively compute \texttt{CANARY\_TOKENS} sampled
-  positions of the shared history and compare them with the predicted
-  cache; if the difference exceeds \texttt{CANARY\_LIMIT}, it shall use
-  native prefill. \emph{Fit criterion:} a test injects a degraded cache and
-  checks that the request falls back and records the reason.
+  \progname{} shall recompute the last \texttt{CANARY\_TOKENS} tokens of
+  the shared history with the target model, using the predicted cache for
+  all earlier positions, and compare the recomputed keys and values with
+  the predicted ones at those positions. If the difference exceeds
+  \texttt{CANARY\_LIMIT}, it shall use native prefill. The check costs
+  about \texttt{CANARY\_TOKENS} tokens of prefill, not the whole history.
+  It detects badly wrong predictions but does not prove a cache correct;
+  SR-09 provides the comparison with native prefill. \emph{Fit criterion:}
+  a test injects a degraded cache and checks that the request falls back
+  and records the reason; T-PERF shows that the check keeps time to first
+  token below native prefill for supported setups.
   \item[SR-11 --- Check cache integrity (H9)] Each predicted cache shall
   carry a checksum and a record of its source model and predictor version;
   \progname{} shall reject a cache whose checksum or record does not
@@ -425,12 +433,18 @@ Table~\ref{tab:constants}.
   disabled by default; the documentation shall state the remaining timing
   risk. \emph{Fit criterion:} T-ISOLATION shows no reuse across groups; a
   documentation review finds the risk statement.
-  \item[SR-13 --- Limit fallback load (H14)] \progname{} shall turn
-  cross-model reuse off automatically when the fallback rate over the last
+  \item[SR-13 --- Limit fallback load (H14)] \progname{} shall admit
+  fallback prefills only within the engine's configured prefill budget,
+  queue at most \texttt{QUEUE\_LIMIT} further requests, and reject any
+  beyond that with a status telling the caller to retry, rather than
+  letting them time out. It shall also turn cross-model reuse off
+  automatically when the fallback rate over the last
   \texttt{FALLBACK\_WINDOW} requests exceeds \texttt{FALLBACK\_RATE\_LIMIT},
-  and report this to the operator. \emph{Fit criterion:} a test invalidates
-  all caches at once and checks that reuse is turned off and normal requests
-  stay within \texttt{REGRESSION\_LIMIT}.
+  so no prediction work is wasted, and report this to the operator.
+  \emph{Fit criterion:} a test invalidates all caches at once under load;
+  admitted requests stay within \texttt{REGRESSION\_LIMIT} of the same load
+  without \progname{} (NFR-08), excess requests receive the retry status
+  instead of timing out, and reuse is turned off.
   \item[SR-14 --- Bound memory for predicted caches (H12)] Memory held by
   predicted but unused caches shall not exceed
   \texttt{PREDICTED\_CACHE\_LIMIT}, and unused caches shall expire after
@@ -446,14 +460,17 @@ Table~\ref{tab:constants}.
 \toprule Constant & Meaning\\\midrule
 \texttt{QUALITY\_LOSS\_LIMIT} & Largest accepted drop in task score for a
 cross-model setup. \todo{choose a value with the team and advisor}\\
-\texttt{CANARY\_TOKENS} & Number of history positions recomputed natively
-for the run-time check. \todo{choose a value}\\
-\texttt{CANARY\_LIMIT} & Largest accepted difference between the canary
-positions and the predicted cache. \todo{choose a value}\\
+\texttt{CANARY\_TOKENS} & Number of final history tokens recomputed for
+the run-time check. \todo{choose a value}\\
+\texttt{CANARY\_LIMIT} & Largest accepted difference between the
+recomputed and predicted keys and values for those tokens.
+\todo{choose a value}\\
 \texttt{FALLBACK\_WINDOW} & Number of recent requests used to compute the
 fallback rate. \todo{choose a value}\\
 \texttt{FALLBACK\_RATE\_LIMIT} & Fallback rate above which reuse is turned
 off. \todo{choose a value}\\
+\texttt{QUEUE\_LIMIT} & Number of requests that may wait for prefill
+before further requests are rejected. \todo{choose a value}\\
 \texttt{PREDICTED\_CACHE\_LIMIT} & Memory allowed for predicted but unused
 caches. \todo{choose a value}\\
 \texttt{PREDICTED\_CACHE\_TTL} & Time after which an unused predicted cache
