@@ -50,7 +50,7 @@
 \midrule
 Oct 18, 2026 & 0.1 & Draft requirements for the current Tandem scope.\\
 Oct 19, 2026 & 0.2 & Make source-to-target KV cache prediction central to the scope, requirements, evaluation and workflow diagram.\\
-Oct 19, 2026 & 0.3 & Shorten supporting sections, definitions and requirement wording; retain technical scope, diagrams and acceptance criteria.\\
+Oct 19, 2026 & 0.3 & Shorten supporting sections and requirements; mark host-provided security features not applicable and consolidate duplicate checks.\\
 \bottomrule
 \end{tabularx}
 
@@ -583,8 +583,8 @@ supplement the Volere outline for the course checklist~\hyperref[src:CHECK]{[CHE
 
 \par\medskip\noindent\phantomsection\label{req:FR-01}
 \textbf{FR-01 --- Check requests before processing}\par
-Tandem shall validate requests against the Data Dictionary before accepting them.\par
-\textbf{Fit criterion.} T-ADM rejects missing fields, unknown models, invalid settings, duplicate IDs and oversized prompts before generation, with reasons; valid cacheless requests pass.\par
+Tandem shall validate requests against the Data Dictionary and check request/cache sizes, references and formats against supported limits before allocating associated resources.\par
+\textbf{Fit criterion.} T-ADM rejects missing fields, unknown models, invalid settings, duplicate IDs and oversized prompts before generation, with reasons; valid cacheless requests pass. T-BOUND checks inconsistent lengths, invalid cache handles and unsupported formats; report rejection, native processing or failure without unlimited retries.\par
 \textbf{Source and rationale.} BR1--BR2; invalid inputs differ from cache misses.
 
 
@@ -632,7 +632,7 @@ Tandem shall retain native processing, including existing prefix caching, when r
 \par\medskip\noindent\phantomsection\label{req:FR-07}
 \textbf{FR-07 --- Recover from or report a prediction/reuse failure}\par
 Tandem shall follow Section~\ref{sec:formal} recovery rules after prediction, validation or loading failure.\par
-\textbf{Fit criterion.} T-FAIL injects predictor exceptions, invalid tensors/loading failures before output and execution failures afterwards. Only safe pre-output native restarts within \texttt{RECOVERY\_LIMIT} are allowed; otherwise report failure.\par
+\textbf{Fit criterion.} T-FAIL injects predictor exceptions, invalid tensors/loading failures before output and execution failures afterwards. Only safe pre-output native restarts within \texttt{RECOVERY\_LIMIT} are allowed, retaining the request ID without duplicate output; otherwise report failure. Never combine failed-attempt and restarted output as one successful response.\par
 \textbf{Source and rationale.} BR2, BR4; prevent retry loops and mixed answers.
 
 
@@ -791,7 +791,7 @@ H6 exhausted resources; H7 mixed failed/restarted answers.
 
 \begin{longtable}{@{}p{0.21\textwidth}p{0.23\textwidth}p{0.50\textwidth}@{}}
 \toprule Requirements & Basis / risk & Planned test\\\midrule\endhead
-\hyperref[req:FR-01]{\texttt{FR-01}} & BR1, BR2 / H6 & T-ADM\\
+\hyperref[req:FR-01]{\texttt{FR-01}} & C4, BR1, BR2 / H1, H3, H6 & T-ADM, T-BOUND\\
 \hyperref[req:FR-02]{\texttt{FR-02}}, \hyperref[req:FR-03]{\texttt{FR-03}} & G1, G3, BR1, BR3 / H1, H2 & T-SEM, T-MATCH\\
 \hyperref[req:FR-04]{\texttt{FR-04}}, \hyperref[req:FR-05]{\texttt{FR-05}} & G1, G2, BR6 / H1, H3 & T-COMP, T-REUSE\\
 \hyperref[req:FR-06]{\texttt{FR-06}}, \hyperref[req:FR-07]{\texttt{FR-07}} & BR2 / H3, H7 & T-NATIVE, T-FAIL\\
@@ -808,8 +808,6 @@ H6 exhausted resources; H7 mixed failed/restarted answers.
 \hyperref[req:SR-02]{\texttt{SR-02}}, \hyperref[req:SR-05]{\texttt{SR-05}} & C4, BR6 / H1, H3 & T-COMP, T-RESTART.\\
 \hyperref[req:SR-03]{\texttt{SR-03}} & G2, G4 / H4 & T-LIFE.\\
 \hyperref[req:SR-06]{\texttt{SR-06}} & BR3 / H5 & T-PRIVACY.\\
-\hyperref[req:SR-07]{\texttt{SR-07}} & C4, BR2 / H1, H3, H6 & T-BOUND.\\
-\hyperref[req:SR-08]{\texttt{SR-08}} & BR4 / H7 & T-FAIL.\\
 \hyperref[req:DR-01]{\texttt{DR-01}}, \hyperref[req:DR-02]{\texttt{DR-02}} & All direct users & T-DOC, T-USABILITY, T-REPORT.\\
 \bottomrule
 \end{longtable}
@@ -1037,28 +1035,19 @@ UC3: Reuse retains exact-prefix and permission checks, not semantic similarity.
 
 \section{Security Requirements}
 
-
 \subsection{Access Requirements}
 \label{sec:security}
-The operator controls the trusted application/cache provider and host access;
-Tandem enforces request-level history-sharing permission.
-
-\par\medskip\noindent\phantomsection\label{req:SR-01}
-\textbf{SR-01 --- Allow only permitted history sharing}\par
-Tandem shall reuse history only with host-granted sharing permission.\par
-\textbf{Fit criterion.} T-ISOLATION uses matching histories across groups and request-controlled permission changes; unauthorized caches are neither used nor exposed.\par
-\textbf{Source and rationale.} BR3 / H2; protect private history.
+\textbf{Not Applicable.} User authentication, accounts and server access are
+managed by the host system; cache-sharing restrictions are covered under Privacy.
 
 \subsection{Integrity Requirements}
-Use only complete, current caches from qualified setups.
+Use only complete, current caches and protect state needed by active requests.
 
 \par\medskip\noindent\phantomsection\label{req:SR-02}
 \textbf{SR-02 --- Do not use incomplete or incompatible caches}\par
 Tandem shall reject incomplete, inconsistent, outdated, unsupported or unqualified caches.\par
 \textbf{Fit criterion.} T-COMP varies each condition; rejected caches never enter generation. Use native processing or report server/resource failure; missing evidence means unsupported.\par
 \textbf{Source and rationale.} C4, BR6 / H1, H3; prevent invalid cache use.
-
-
 
 \par\medskip\noindent\phantomsection\label{req:SR-03}
 \textbf{SR-03 --- Protect caches still in use}\par
@@ -1067,8 +1056,14 @@ Tandem shall protect active caches from invalidating removal, modification or re
 \textbf{Source and rationale.} G2, G4 / H4; preserve active state.
 
 \subsection{Privacy Requirements}
-KV state can contain private information; enforce sharing permissions and
-use public or synthetic data in published tests.
+KV state can contain private information; restrict sharing and keep private
+content out of normal logs. Published tests use public or synthetic data.
+
+\par\medskip\noindent\phantomsection\label{req:SR-01}
+\textbf{SR-01 --- Allow only permitted history sharing}\par
+Tandem shall reuse history only with host-granted sharing permission.\par
+\textbf{Fit criterion.} T-ISOLATION uses matching histories across groups and request-controlled permission changes; unauthorized caches are neither used nor exposed.\par
+\textbf{Source and rationale.} BR3 / H2; protect private history.
 
 \par\medskip\noindent\phantomsection\label{req:SR-04}
 \textbf{SR-04 --- Keep private instructions and answers separate}\par
@@ -1076,16 +1071,11 @@ Tandem shall exclude other requests' private instructions/answers from reused hi
 \textbf{Fit criterion.} T-ISOLATION varies another request's private instructions while fixing the current request; scores pass \hyperref[req:NFR-05]{\texttt{NFR-05}}, greedy tokens match and native controls pass.\par
 \textbf{Source and rationale.} BR3 / H2; shared history grants no access to later private text.
 
-
-
 \par\medskip\noindent\phantomsection\label{req:SR-05}
 \textbf{SR-05 --- Invalidate old caches after restart or setup changes}\par
 The first release shall restrict caches to the serving lifetime and invalidate references after restart/incompatible configuration changes.\par
 \textbf{Fit criterion.} T-RESTART rejects old references; default exports contain no prompts/caches.\par
 \textbf{Source and rationale.} BR3 / H3; host handles physical GPU-memory erasure.
-
-\subsection{Audit Requirements}
-Record request/setup IDs and reuse/failure reasons without private content.
 
 \par\medskip\noindent\phantomsection\label{req:SR-06}
 \textbf{SR-06 --- Keep private contents out of normal logs}\par
@@ -1093,23 +1083,15 @@ Normal logs/measurements shall retain IDs/reasons but omit raw prompts, answers,
 \textbf{Fit criterion.} T-PRIVACY checks exports for injected secrets. Detailed output traces require explicit enablement, public/synthetic data and a declared retention period.\par
 \textbf{Source and rationale.} BR3 / H5; minimize sensitive records.
 
+\subsection{Audit Requirements}
+\textbf{Not Applicable.} No separate security audit trail is required;
+operational measurements are covered by \hyperref[req:FR-10]{\texttt{FR-10}}.
+
 \subsection{Immunity Requirements}
-Treat prompts/answers as data, never executable server commands; host security
-remains the operator's responsibility.
-
-\par\medskip\noindent\phantomsection\label{req:SR-07}
-\textbf{SR-07 --- Check size and format limits}\par
-Tandem shall validate request/cache sizes and formats before allocating associated resources.\par
-\textbf{Fit criterion.} T-BOUND checks inconsistent lengths, invalid handles, unsupported formats and oversized inputs; outcomes are explicit rejection/native processing/failure, without unlimited retries.\par
-\textbf{Source and rationale.} C4, BR2 / H1, H3, H6; bound resource use.
-
-
-
-\par\medskip\noindent\phantomsection\label{req:SR-08}
-\textbf{SR-08 --- Do not mix a failed answer with a restarted answer}\par
-Tandem shall never combine failed-attempt output and restarted output as one successful response.\par
-\textbf{Fit criterion.} T-FAIL forces post-output failure: final status is failed. Pre-output restart retains the request ID without duplicate output.\par
-\textbf{Source and rationale.} BR4 / H7; enforce \hyperref[req:FR-07]{\texttt{FR-07}} recovery.
+\textbf{Not Applicable.} Operating-system, network and malware protection
+are provided by the host environment; input/cache validation remains required
+under \hyperref[req:FR-01]{\texttt{FR-01}} and
+\hyperref[req:FR-04]{\texttt{FR-04}}.
 
 \section{Cultural Requirements}
 
