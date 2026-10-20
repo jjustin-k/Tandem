@@ -213,7 +213,7 @@ Together AI are real-company examples, while Alex Morgan and Sofia Nguyen
 are fictional individual personas. The company profiles describe proposed
 adoption scenarios and inferred needs, not confirmed partnerships, internal
 architectures or requirements supplied by those companies. Each profile
-connects the user's work and challenges to relevant Tandem requirements.
+describes the user's work, challenges and potential use of Tandem.
 
 \par\medskip\noindent\phantomsection\label{persona:cursor}
 \textbf{Cursor (AI Application Company)}
@@ -233,11 +233,7 @@ a hosted model API alone does not give access to that model's KV cache.
 The application team would need the complete conversation and the router's
 selected model to remain unchanged, supported model pairs to be documented,
 and measured evidence of latency and cost benefits. Valid requests would
-continue through native prefill when reuse is unavailable. These inferred
-needs inform \hyperref[req:FR-02]{\texttt{FR-02}},
-\hyperref[req:FR-06]{\texttt{FR-06}},
-\hyperref[req:FR-12]{\texttt{FR-12}} and
-\hyperref[req:DR-01]{\texttt{DR-01}}.
+continue through native prefill when reuse is unavailable.
 
 \par\medskip\noindent\phantomsection\label{persona:together}
 \textbf{Together AI (Inference Hosting Provider)}
@@ -258,11 +254,7 @@ useful failure reasons and a way to disable reuse while retaining native
 processing. An adoption decision would require measured benefits that include
 KV prediction and loading overhead, along with privacy and correctness
 checks. Compatibility with Together AI's production stack would require a
-separate assessment. These inferred needs inform
-\hyperref[req:FR-13]{\texttt{FR-13}},
-\hyperref[req:NFR-07]{\texttt{NFR-07}},
-\hyperref[req:SR-01]{\texttt{SR-01}} and
-\hyperref[req:SR-07]{\texttt{SR-07}}.
+separate assessment.
 
 \par\medskip\noindent\phantomsection\label{persona:alex}
 \textbf{Alex Morgan (Inference-Engine Maintainer)}
@@ -279,11 +271,7 @@ Alex would integrate and review Tandem's engine changes, diagnose cache-format
 or compatibility failures, and rerun tests after updates. Alex needs documented
 interfaces, versioned compatibility information and tests that reject
 unsupported caches. The integration must preserve the selected model's output
-and retain native processing when reuse cannot be used. These needs inform
-\hyperref[req:FR-04]{\texttt{FR-04}},
-\hyperref[req:FR-05]{\texttt{FR-05}},
-\hyperref[req:FR-14]{\texttt{FR-14}} and
-\hyperref[req:NFR-11]{\texttt{NFR-11}}.
+and retain native processing when reuse cannot be used.
 
 \par\medskip\noindent\phantomsection\label{persona:sofia}
 \textbf{Sofia Nguyen (LLM Inference Researcher)}
@@ -302,10 +290,7 @@ requests, model-routing decisions and generation settings the same. She needs
 per-request measurements, repeated trials, output checks and records of cache
 hits, rejected caches and fallback outcomes. She also needs enough information
 to reproduce results and distinguish estimated cost savings from measured GPU
-time. Her needs inform \hyperref[req:FR-10]{\texttt{FR-10}},
-\hyperref[req:FR-11]{\texttt{FR-11}},
-\hyperref[req:FR-12]{\texttt{FR-12}} and
-\hyperref[req:NFR-05]{\texttt{NFR-05}}.
+time.
 
 \subsection{Priorities Assigned to Users}
 Keeping responses consistent with normal model processing and protecting
@@ -626,23 +611,6 @@ Limits that depend on the model or GPU will be recorded with the tested setup.
 
 
 \subsection{The Current Situation}
-A conversation application saves the history and includes it with later
-requests. If vLLM Semantic Router selects a different model for the next turn, that model may
-need to process the history again. The serving engine may already have useful
-prefix-cache features, and those features stay enabled in the comparison.
-Tandem investigates whether predicting the new model's KV cache from the
-earlier model's KV cache can reduce that repeated work while meeting the
-approved target-output criteria.
-
-The current problem is that a source model's KV tensors do not automatically
-provide the target model's attention state. Tandem addresses this with a
-predictor that estimates the target KV cache from the source KV cache.
-Figure~\ref{fig:current-situation} shows the proposed workflow addressing
-that problem. Runtime checks verify the predicted cache's metadata, tensor
-layout, finite values and supported predictor profile; prediction accuracy
-is established separately through offline evaluation. Native prefix caching
-remains enabled on the normal-processing path~\hyperref[src:APC]{[APC]}.
-
 \begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth,height=0.82\textheight,keepaspectratio]{figures/TandemStateDiagram.drawio.png}
@@ -650,41 +618,15 @@ remains enabled on the normal-processing path~\hyperref[src:APC]{[APC]}.
 \label{fig:current-situation}
 \end{figure}
 
+
 \subsection{The Context of the Work}
-This section explains where Tandem fits in a model-serving system. The
-\emph{source model} is the model used earlier in the conversation. The
-\emph{target model} is the model selected to answer the next turn. Tandem
-uses the source model's KV cache to predict the target model's KV cache for
-the conversation history they share.
+\begin{figure}[H]
+\centering
+\includegraphics[width=\linewidth,height=0.78\textheight,keepaspectratio]{figures/Tandem Context Diagram.drawio.png}
+\caption{Tandem context diagram showing model selection, source and predicted target KV caches, and application responses.}
+\label{fig:work-context}
+\end{figure}
 
-\begin{tabularx}{\textwidth}{@{}p{0.27\textwidth}X@{}}
-\toprule System or user & Role in the Tandem workflow\\\midrule
-Application & Sends the conversation history, new message and response settings through the existing serving interface. Receives generated text or an error.\\
-vLLM Semantic Router & Chooses the target model for the request. Tandem uses this choice when predicting the target KV cache.\\
-Inference engine's cache manager & Makes the source KV cache available to Tandem, together with the source model's identity and the part of the history that the cache covers. A cache handle is a reference used to locate these tensors in memory.\\
-Server operator & Configures the models, supported predictors and GPU resource limits. Checks status messages and investigates failures.\\
-Evaluation tools & Run repeatable tests. Compare predicted KV caches with native target KV caches, then measure response quality, latency, throughput and compute cost.\\
-\bottomrule
-\end{tabularx}
-
-The application does not need to put KV tensors in its normal request. The
-engine's cache manager provides access to the source KV state through the
-internal integration.
-
-The team's main task is to develop and test the KV predictor. This includes
-preparing paired source and target KV data, fitting or training the predictor
-if needed, and connecting it to the inference engine. During a request,
-Tandem predicts the target KV cache and checks that it can be loaded for the
-selected model and history. If those checks pass, the engine loads the
-prediction, prefills the prompt tokens after the cached history and generates
-the response. If prediction is unavailable or fails, the engine uses normal
-target-model processing.
-
-Tests check how accurate the predictions are and whether the complete
-workflow saves time and GPU compute after including predictor overhead.
-The team uses the existing semantic router to select models and keeps the
-base LLM weights fixed; developing the router and training the base LLMs
-are outside Tandem's scope.
 
 \subsection{Work Partitioning}
 The tables divide Tandem's work by the events it must respond to. Part I
@@ -836,71 +778,13 @@ PUC6 & A request is cancelled or times out & Report its final status and release
 \end{longtable}
 
 \subsection{Individual Product Use Cases (PUC's)}
-Figure~\ref{fig:product-use-cases} focuses on Tandem's central inference
-use case: performing LLM inference after a model switch. The external
-actor is the host inference service's request handler, which calls the
-Tandem predictor and inference integration. It supplies the routed request
-and access to the source KV cache. vLLM Semantic Router has already selected
-the target model; Tandem does not make that selection.
-
-The illustrated scenario starts with a valid request, prediction enabled,
-source KV state available and a supported source/target predictor setup.
-The \emph{include} arrows identify capabilities required by this scenario:
-predicting target KV state from source KV state and generating the response
-with the selected target model. The main use case checks the prediction,
-loads accepted state and prefills the uncached prompt suffix before decoding.
-These compatibility and loading steps remain in the written scenario rather
-than becoming separate ovals.
-
-The \emph{extend} arrow points from native target-model prefill to the main
-use case. This adds fallback at the extension point \emph{Prepare target KV
-state} when prediction is rejected or fails, or loading fails before any
-output is returned. Existing native prefix caching remains available. If a
-safe fallback is impossible, the request reports failure. Once output has
-started, a failure is reported without appending a restarted answer.
-
-If the initial prediction conditions are absent, the request uses normal
-processing as described in the use cases below. The solid actor association
-and dashed use-case relationships do not specify execution order; the state
-diagram describes the runtime flow.
-
 \begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth,height=0.78\textheight,keepaspectratio]{figures/Tandem Use Case Diagram.drawio.png}
-\caption{Perform LLM inference after a model switch using source-to-target KV prediction, with required prediction and response generation and conditional native-prefill fallback.}
+\caption{Use case for model-switch inference with source KV available, prediction enabled and a supported predictor.}
 \label{fig:product-use-cases}
 \end{figure}
 
-\textbf{PUC1: Predict and use target KV state.} Check the request, source
-cache and selected target model. Run the supported predictor on the source
-keys and values to estimate target KV state for the shared history. Validate
-its metadata, layout, finite values and sharing permissions. If the checks
-pass and memory is available, load the predicted cache, prefill the uncached
-suffix and decode, returning output with the request ID.
-
-\textbf{PUC2: Process without reuse.} If no cache is available or a check
-fails, record the reason and use the selected model's normal processing.
-This is expected behaviour, not a rejection of an otherwise valid request.
-Normal same-model prefix caching remains available.
-
-\textbf{PUC3: Handle a reuse failure.} If no output has been returned,
-discard invalid state and attempt a limited restart through normal processing.
-If output has already started, end the response with a failure status. Do not
-append a newly restarted answer to the partial answer.
-
-\textbf{PUC4: Change the setup.} Check the new configuration before using it
-for new requests. Keep untested model/cache combinations disabled. Do not reuse
-old state when its model or configuration version no longer matches.
-
-\textbf{PUC5: Compare performance.} An operator or researcher records the
-settings and test requests, compares predicted KV state with native target
-KV references, checks output consistency and runs repeated paired serving
-comparisons. Include predictor overhead, fallback and failed requests in the
-report. A setup that fails output checks is not approved for reuse.
-
-\textbf{PUC6: Stop a request.} Record cancellation or timeout and release
-the request's claim on memory. Keep any shared state still needed by another
-active request intact.
 
 \section{Functional Requirements}
 
