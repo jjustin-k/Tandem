@@ -1,7 +1,12 @@
 \documentclass{article}
 
+\usepackage[margin=1in]{geometry}
 \usepackage{booktabs}
 \usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{pdflscape}
+\usepackage{enumitem}
 \usepackage{hyperref}
 
 \hypersetup{
@@ -12,6 +17,8 @@
     urlcolor=cyan           % color of external links
 }
 
+\setlength{\emergencystretch}{3em}
+
 \title{Hazard Analysis\\\progname}
 
 \author{\authname}
@@ -20,6 +27,8 @@
 
 \input{../Comments.text}
 \input{../Common.text}
+
+\newcommand{\srs}{\href{../SRS-Volere/SRS.pdf}{SRS}}
 
 \begin{document}
 
@@ -36,9 +45,8 @@
 \toprule
 \textbf{Date} & \textbf{Developer(s)} & \textbf{Change}\\
 \midrule
-Date1 & Name(s) & Description of changes\\
-Date2 & Name(s) & Description of changes\\
-... & ... & ...\\
+Oct 19, 2026 & William Pol & First draft of all sections; see the
+disclosure appendix\\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -51,107 +59,564 @@ Date2 & Name(s) & Description of changes\\
 
 \pagenumbering{arabic}
 
-\wss{You are free to modify this template.}
-
 \section{Introduction}
+\label{sec:intro}
 
-\wss{You can include your definition of what a hazard is here.}
+This document analyzes the hazards of \progname{}, which predicts a target
+model's key-value (KV) cache from a source model's KV cache and loads the
+prediction into a large language model (LLM) serving engine. When a
+semantic router sends the next turn of a conversation to a different model,
+\progname{} lets the new model start from the predicted cache instead of
+processing the whole conversation history again (prefill). The prediction
+is approximate, so much of this analysis concerns how a wrong prediction is
+caught before it reaches the user. The Software Requirements
+Specification (\srs{}) describes the requirements this analysis refers to.
+
+A \emph{hazard} is a condition of \progname{} that, together with a
+condition in its environment, can lead to a loss. \progname{} does not
+control physical equipment, so, as the course allows, we treat harm
+broadly: incorrect answers, disclosure of private information, unavailable
+service, wasted computing resources, and misleading performance claims.
+
+\paragraph{Changes to the template.} We added a hazard list
+(Section~\ref{sec:hazards}) before the Failure Mode and Effect Analysis
+(FMEA) so that the table, the \srs{} and the roadmap can all refer to the
+same hazard identifiers. The FMEA table adds a hazard column for that
+traceability.
 
 \section{Scope and Purpose of Hazard Analysis}
+\label{sec:scope}
 
-\wss{You should say what \textbf{loss} could be incurred because of the
-hazards.}
+The purpose of this analysis is to find how \progname{} can fail, decide
+how each failure is detected and mitigated, and turn the mitigations into
+requirements. Following the as low as reasonably practicable (ALARP)
+principle, the goal is not zero risk but risk reduced as far as is
+practical within the capstone.
+
+The losses considered are:
+\begin{enumerate}[label=L\arabic*., ref=L\arabic*]
+  \item \label{loss:wrong} \textbf{Incorrect response.} An application
+  receives an answer that differs from what the selected model would have
+  produced, and nothing marks it as unusual.
+  \item \label{loss:privacy} \textbf{Privacy loss.} One user's
+  conversation, instructions or answer is revealed to another user,
+  directly or indirectly.
+  \item \label{loss:service} \textbf{Lost service.} A valid request
+  fails, times out, or slows other requests beyond acceptable limits.
+  \item \label{loss:waste} \textbf{Wasted resources.} Graphics processing
+  unit (GPU) memory or time is spent on work that is never used.
+  \item \label{loss:claims} \textbf{Misleading results.} Evaluation reports
+  claim a speedup or quality level that the system does not deliver,
+  leading stakeholders to adopt it wrongly.
+\end{enumerate}
+
+The analysis covers \progname{} on a single server, as the \srs{} scopes
+it, including the development and evaluation of the KV cache predictor. It
+excludes the semantic router's choice of model, the application that
+stores the conversation, training of the base models, and operation across
+several servers, because these are outside the product boundary in the
+\srs{}. Failures at those boundaries are still considered where they
+affect \progname{}.
 
 \section{System Boundaries and Components}
+\label{sec:components}
 
-\wss{Dividing the system into components will help you brainstorm the hazards.
-You shouldn't do a full design of the components, just get a feel for the major
-ones.  For projects that involve hardware, the components will typically include
-each individual piece of hardware.  If your software will have a database, or an
-important library, these are also potential components.}
+The components below come from the context and work partitioning in the
+\srs{}. They are used to brainstorm hazards, not as a design.
+
+\paragraph{Inside \progname{}.}
+\begin{enumerate}[label=C\arabic*., ref=C\arabic*]
+  \item \label{comp:validate} \textbf{Request validation:} checks request
+  fields, sizes and settings before work begins.
+  \item \label{comp:predict} \textbf{KV cache predictor:} estimates the
+  target model's keys and values from the source model's KV cache, using
+  versioned parameters and recorded token, layer and head alignment
+  (\srs{} FR-16). Its parameters may be fitted on paired source and target
+  caches.
+  \item \label{comp:check} \textbf{Compatibility checker:} decides whether a
+  candidate cache may be used, using the checks in the \srs{} formal
+  specification (model setup, exact prefix, permission, readiness and
+  resources).
+  \item \label{comp:load} \textbf{KV loader:} places an accepted cache into
+  the serving engine's KV memory and prefills the remaining prompt.
+  \item \label{comp:native} \textbf{Native prefill fallback:} processes the
+  full prompt normally when reuse is off, unavailable or unsuitable.
+  \item \label{comp:output} \textbf{Decoding and output streaming:} returns
+  generated tokens in order under the correct request identifier (ID).
+  \item \label{comp:life} \textbf{Request lifecycle:} handles completion,
+  failure, cancellation and timeout, and releases memory.
+  \item \label{comp:config} \textbf{Configuration and tested-setup
+  registry:} stores the approved model/cache setups and the reuse on/off
+  control.
+  \item \label{comp:log} \textbf{Logging and metrics:} records per-request
+  status, reuse decisions and measurements.
+  \item \label{comp:bench} \textbf{Benchmark tools:} run matched workloads
+  with and without \progname{} and produce comparison reports.
+\end{enumerate}
+
+\paragraph{Outside \progname{}, but sources of hazards.}
+\begin{enumerate}[resume*]
+  \item \label{comp:router} \textbf{Semantic router:} selects the target
+  model for each turn.
+  \item \label{comp:app} \textbf{Application:} supplies the conversation,
+  the new message and the sharing group of each request.
+  \item \label{comp:engine} \textbf{Serving engine and GPU:} the vLLM
+  engine \cite{Kwon2023vLLM}, its memory manager, the source and target
+  model files, the source model's KV cache and the hardware.
+\end{enumerate}
 
 \section{Critical Assumptions}
+\label{sec:assumptions}
 
-\wss{These assumptions that are made about the software or system.  You should
-minimize the number of assumptions that remove potential hazards.  For instance,
-you could assume a part will never fail, but it is generally better to include
-this potential failure mode.}
+The \srs{} lists assumptions A1--A6. Only the following affect which
+hazards are analyzed:
+
+\begin{itemize}
+  \item \textbf{A1 (trusted cache provider).} The \srs{} assumes the
+  initial cache provider runs in the operator's trusted environment and
+  that users cannot upload caches. Because \progname{}'s own predictor now
+  produces the cache, deliberate tampering is less likely, but a cache can
+  still be corrupted by a software fault, a storage error or a mismatched
+  predictor version. We therefore do \emph{not} rely on A1: H9 remains in
+  the analysis, and stronger mitigations are placed on the roadmap for any
+  future release that accepts caches from outside.
+  \item \textbf{A4 (a useful predictor exists).} The \srs{} states that a
+  predictor which is both accurate enough and cheaper than prefill is a
+  proof-of-concept question. We do not assume it succeeds: H8 and H15
+  cover a predictor that is inaccurate or too slow, and in both cases the
+  native prefill path must remain correct.
+  \item \textbf{A2 (router and application inputs).} The router's model
+  choice and the application's conversation are taken as given. \progname{}
+  still validates them (H1, H6), because a wrong input must not cause a
+  wrong cache to be used.
+  \item \textbf{A3 (adequate server).} The server can run the selected
+  models normally. Running out of memory is still analyzed (H6, H12, H14).
+  \item \textbf{A5 (data for the predictor).} Public or synthetic
+  conversations are available for fitting and testing the predictor. If
+  the same conversations are used for both, results look better than they
+  are; this is analyzed as part of H11.
+\end{itemize}
+
+No assumption states that a component never fails.
+
+\section{Hazards}
+\label{sec:hazards}
+
+Table~\ref{tab:hazards} lists the hazards.
+
+\begin{longtable}{@{}p{0.07\textwidth}p{0.62\textwidth}p{0.22\textwidth}@{}}
+\caption{Hazards and the losses they can cause}\label{tab:hazards}\\
+\toprule ID & Hazard & Losses\\\midrule\endfirsthead
+\toprule ID & Hazard & Losses\\\midrule\endhead
+H1 & An incompatible cache (wrong model, tokenizer, format, positions or
+precision) is used and changes the response. & \ref{loss:wrong}\\
+H2 & One request uses or reveals another request's private history,
+instructions or answer. & \ref{loss:privacy}\\
+H3 & An old or incomplete cache is used. & \ref{loss:wrong}\\
+H4 & Cache data is changed or removed while a request still uses it. &
+\ref{loss:wrong}, \ref{loss:service}\\
+H5 & Logs or measurement files reveal private data. &
+\ref{loss:privacy}\\
+H6 & Memory or other resources run out. & \ref{loss:service}\\
+H7 & Output from a failed reuse attempt is mixed with a restarted answer. &
+\ref{loss:wrong}\\
+H8 & A compatible, tested predicted cache still lowers answer quality,
+because cross-model prediction is approximate. & \ref{loss:wrong},
+\ref{loss:claims}\\
+H9 & A cache is corrupted or deliberately altered before it is loaded. &
+\ref{loss:wrong}, \ref{loss:privacy}\\
+H10 & The time difference between reuse and normal processing reveals
+information about other users' conversations. & \ref{loss:privacy}\\
+H11 & Evaluation reports overstate the benefit or hide failures. &
+\ref{loss:claims}\\
+H12 & Predicted caches that are never used consume memory and GPU time. &
+\ref{loss:waste}, \ref{loss:service}\\
+H13 & The model, tokenizer, alignment rules or predictor version change
+between predicting a cache and using it. & \ref{loss:wrong}\\
+H14 & Many reuse attempts fail at once and the fallback overloads the
+server. & \ref{loss:service}\\
+H15 & Predicting, checking and loading the cache takes longer than native
+prefill, so reuse slows the request instead of speeding it up. &
+\ref{loss:service}, \ref{loss:waste}\\
+\bottomrule
+\end{longtable}
+
+Three hazards need context.
+
+\paragraph{H8, approximate prediction.} Unlike same-model prefix caching,
+predicting one model's KV cache from another's does not reproduce the
+target model's own cache exactly. Published results show that the quality
+loss can be large and depends on the direction of transfer. For example,
+one cross-family method reports a question-answering F1 score falling from
+45.6 to 20.6 when transferring from a 4-billion-parameter model to a
+14-billion-parameter model, while some transfers in the opposite direction
+stay close to the target's own results \cite{Yun2026HeteroFold}. A cache
+with the right shape and a passing compatibility check is therefore not
+necessarily good enough, and a predictor that scores well on the
+conversations it was fitted on may not do so on new ones.
+
+\paragraph{H9, altered cache.} Retained KV state can change a model's
+behaviour even when the text that produced it is no longer part of the
+request \cite{Zhang2026Aborted}. A cache that has been corrupted or altered
+could therefore steer the response without any visible change to the
+prompt.
+
+\paragraph{H10, timing side channel.} Shared prefix caches in LLM serving
+systems have been shown to leak information through timing: a cache hit
+returns its first token sooner, which lets an observer infer what other
+users have sent \cite{Song2024EarlyBird}. \progname{} adds another fast
+path, so the same risk applies.
 
 \section{Failure Mode and Effect Analysis}
+\label{sec:fmea}
 
-\wss{Include your FMEA table here. This is the most important part of this document.}
-\wss{The safety requirements in the table do not have to have the prefix SR.
-The most important thing is to show traceability to your SRS. You might trace to
-requirements you have already written, or you might need to add new
-requirements.}
-\wss{If no safety requirement can be devised, other mitigation strategies can be
-entered in the table, including strategies involving providing additional
-documentation, and/or test cases.}
+Table~\ref{tab:fmea} analyzes how each component can fail. Each row gives
+the recommended action and the \srs{} requirement that implements it.
+
+\begin{landscape}
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{@{}p{0.04\linewidth}p{0.10\linewidth}p{0.13\linewidth}%
+p{0.13\linewidth}p{0.13\linewidth}p{0.11\linewidth}p{0.16\linewidth}%
+p{0.07\linewidth}p{0.05\linewidth}@{}}
+\caption{Failure Mode and Effect Analysis}\label{tab:fmea}\\
+\toprule
+ID & Component & Failure mode & Effects & Causes & Detection &
+Recommended action & Req. & Hazard\\
+\midrule\endfirsthead
+\toprule
+ID & Component & Failure mode & Effects & Causes & Detection &
+Recommended action & Req. & Hazard\\
+\midrule\endhead
+F1 & Request validation & Accepts a malformed or oversized request &
+Out-of-memory error or wrong output; other requests slowed & Missing size
+or setting checks & Rejection tests with invalid inputs (T-ADM) & Reject
+before allocating resources; check sizes against the configuration & FR-01,
+SR-07 & H6\\
+F2 & Compatibility checker & Accepts a cache predicted for a different
+model, tokenizer, format or position layout & Garbled or subtly wrong
+answer & Missing metadata treated as a pass; equal cache sizes treated as a
+match & Each check forced to fail separately (T-COMP, T-MATCH) & Treat
+missing information as a failed check; require every check to pass & FR-03,
+FR-04, SR-02 & H1\\
+F3 & Compatibility checker & Accepts a cache from before a model or
+configuration change & Wrong answer & Version not recorded; restart without
+invalidation & Change the model or configuration, then reuse an old cache
+(T-CONFIG) & Record versions with each cache; invalidate on restart or
+change & SR-05, FR-13 & H3, H13\\
+F4 & KV cache predictor & A tested, compatible predicted cache lowers
+answer quality & Plausible but wrong answers, worst when predicting a
+larger model from a smaller one & Approximate prediction; conversation
+unlike the fitting data & Held-out prediction error and output tests
+(T-PRED, T-QUAL); run-time check on the last history tokens & Approve
+each setup only within a quality-loss limit; at run time, recompute the
+last few history tokens on top of the predicted cache and fall back when
+they disagree & SR-09, SR-10, FR-14, FR-16 & H8\\
+F5 & KV cache predictor & Predicted cache is corrupted before loading &
+Steered or wrong answer & Storage error; software fault; untrusted source
+in a future release & Integrity check fails & Record a checksum and the
+predictor version with each cache; reject on mismatch & SR-11, SR-02 &
+H9\\
+F6 & KV cache predictor & Tokens, layers or heads aligned wrongly between
+source and target & Keys and values placed at the wrong positions; garbled
+answer & Tokenizers split text differently; alignment rules not updated
+for a new model pair & Alignment checks in T-PRED; run-time check on the
+last history tokens & Record alignment with each cache; reject a cache whose
+alignment does not match the configured rules & FR-16, SR-02, SR-10 & H1,
+H8\\
+F7 & KV cache predictor & Produces invalid tensors (wrong shape,
+non-finite values) & Request crashes or produces nonsense & Numerical
+overflow; input outside the fitted range & Forced invalid outputs
+(T-FAIL) & Validate shape and values before loading; fall back to native
+prefill & FR-07, FR-16 & H1, H6\\
+F8 & KV cache predictor & Prediction and loading take longer than native
+prefill & Slower first token than without \progname{} & Short shared
+history; large predictor; slow loading path & TTFT benchmarks against
+native prefill (T-PERF) & Use prediction only where tests show a gain;
+otherwise use native prefill & NFR-04, NFR-08 & H15\\
+F9 & Compatibility checker & Reuses a cache from another request's sharing
+group & Private history exposed & Sharing group not checked; request names
+its own group & Cross-group isolation tests (T-ISOLATION) & Sharing group
+assigned by the host; permission check required & SR-01, SR-04 & H2\\
+F10 & KV loader & Reuse is measurably faster than normal processing & An
+observer infers other users' conversations & Caches reused across users &
+Review of sharing settings; timing tests & Reuse only within one sharing
+group; disable cross-user sharing by default; document the remaining risk &
+SR-12 & H10\\
+F11 & KV loader & Cache evicted or overwritten while in use & Corrupted
+output for an active request & Reference-counting fault; eviction policy &
+Repeated lifecycle tests (T-LIFE) & Pin caches while any request uses them
+& SR-03, FR-09 & H4\\
+F12 & KV loader & Loading fails after output has started & Partial answer
+& GPU error; memory shortage & Forced failure tests (T-FAIL) & End with a
+failure status; never append a restarted answer & FR-07, SR-08 & H7\\
+F13 & Native prefill fallback & Fallback is not triggered or fails & A
+valid request fails & Logic fault; fallback disabled & Missing-cache and
+unsupported-pair tests (T-NATIVE) & Fall back on any failed check; keep the
+normal path always available & FR-06, NFR-06 & H1, H6\\
+F14 & Native prefill fallback & Many requests fall back at the same time &
+Delay spike and timeouts for all requests & A configuration change or
+predictor fault invalidates many caches at once & Fallback-rate and queue
+metrics & Admit prefills only within the engine's budget; queue a bounded
+number and reject the rest with a retry status; turn reuse off when the
+fallback rate exceeds a limit & SR-13, NFR-08 & H14\\
+F15 & KV cache predictor & Predicted caches are never used & Memory
+pressure, evictions and wasted GPU time & Cache predicted for a model the
+router did not select & Memory and prediction metrics & Cap the memory for
+predicted caches and expire unused ones & SR-14 & H12, H6\\
+F16 & Request lifecycle & Cancelled or timed-out request keeps its memory
+& Memory leak leading to out-of-memory errors & Missing release path &
+Repeated cancellation tests (T-LIFE, T-CANCEL) & Release resources on every
+final status & FR-09, FR-15 & H6\\
+F17 & Output streaming & Tokens attached to the wrong request & A user
+receives another user's answer & Request IDs mixed under concurrency &
+Overlapping-request tests (T-STATE) & Keep one ordered output stream and one
+final status per request & FR-08 & H2\\
+F18 & Logging and metrics & Raw prompts, answers or cache data written to
+logs & Private data exposed & Debug logging left on & Scan of logs after
+tests (T-PRIVACY) & Log only IDs and status or reason codes & SR-06 & H5\\
+F19 & Benchmark tools & Baseline differs from the \progname{} run, or
+failures and preparation cost are left out & Overstated benefit & Different
+settings; selective reporting & Configuration comparison (T-EVAL, T-REPORT)
+& Run matched workloads; report failures, runs with no gain, and cache
+preparation cost & FR-11, FR-12 & H11\\
+F20 & Configuration registry & An untested setup is enabled & Wrong or
+low-quality answers & Operator error & Attempt to enable without evidence
+(T-QUAL) & Keep reuse off for setups without passing test records & FR-13,
+FR-14 & H1, H8\\
+F21 & Benchmark tools & Predictor evaluated on conversations it was
+fitted on & Reported accuracy higher than in real use & Data split done
+after fitting, or overlapping conversations & Check of the recorded data
+split (T-QUAL, T-REPORT) & Split conversations into fitting and held-out
+groups before fitting; report the split & FR-14, FR-12 & H11, H8\\
+\bottomrule
+\end{longtable}
+\end{landscape}
 
 \section{Safety and Security Requirements}
+\label{sec:requirements}
 
-\wss{Newly discovered requirements.  These should also be added to the SRS.  (A
-rationale design process how and why to fake it.)}
+The existing \srs{} requirements SR-01 to SR-08 mitigate H1--H7 and are
+referenced in Table~\ref{tab:fmea}. The analysis found the following new
+requirements, which should be added to the \srs{} security and robustness
+sections. Their fit criteria use the constants in
+Table~\ref{tab:constants}.
+
+\begin{description}[style=nextline]
+  \item[SR-09 --- Limit the quality loss of each cross-model setup (H8)]
+  \progname{} shall enable a cross-model setup only if, on its declared test
+  set, which shares no conversations with the data used to fit the
+  predictor, the selected model's task scores with the predicted cache are
+  no more than \texttt{QUALITY\_LOSS\_LIMIT} below its scores with native
+  prefill. \emph{Fit criterion:} T-QUAL compares both runs on the same test
+  set; a setup above the limit stays disabled.
+  \item[SR-10 --- Check predicted caches at run time (H8)] For each reuse,
+  \progname{} shall recompute the last \texttt{CANARY\_TOKENS} tokens of
+  the shared history with the target model, using the predicted cache for
+  all earlier positions, and compare the recomputed keys and values with
+  the predicted ones at those positions. If the difference exceeds
+  \texttt{CANARY\_LIMIT}, it shall use native prefill. The check costs
+  about \texttt{CANARY\_TOKENS} tokens of prefill, not the whole history.
+  It detects badly wrong predictions but does not prove a cache correct;
+  SR-09 provides the comparison with native prefill. \emph{Fit criterion:}
+  a test injects a degraded cache and checks that the request falls back
+  and records the reason; T-PERF shows that the check keeps time to first
+  token below native prefill for supported setups.
+  \item[SR-11 --- Check cache integrity (H9)] Each predicted cache shall
+  carry a checksum and a record of its source model and predictor version;
+  \progname{} shall reject a cache whose checksum or record does not
+  match. \emph{Fit
+  criterion:} a test alters one byte of a cache and checks that it is
+  rejected.
+  \item[SR-12 --- Limit timing leaks (H10)] \progname{} shall reuse a cache
+  only within the sharing group it was predicted for, with reuse across users
+  disabled by default; the documentation shall state the remaining timing
+  risk. \emph{Fit criterion:} T-ISOLATION shows no reuse across groups; a
+  documentation review finds the risk statement.
+  \item[SR-13 --- Limit fallback load (H14)] \progname{} shall admit
+  fallback prefills only within the engine's configured prefill budget,
+  queue at most \texttt{QUEUE\_LIMIT} further requests, and reject any
+  beyond that with a status telling the caller to retry, rather than
+  letting them time out. It shall also turn cross-model reuse off
+  automatically when the fallback rate over the last
+  \texttt{FALLBACK\_WINDOW} requests exceeds \texttt{FALLBACK\_RATE\_LIMIT},
+  so no prediction work is wasted, and report this to the operator.
+  \emph{Fit criterion:} a test invalidates all caches at once under load;
+  admitted requests stay within \texttt{REGRESSION\_LIMIT} of the same load
+  without \progname{} (NFR-08), excess requests receive the retry status
+  instead of timing out, and reuse is turned off.
+  \item[SR-14 --- Bound memory for predicted caches (H12)] Memory held by
+  predicted but unused caches shall not exceed
+  \texttt{PREDICTED\_CACHE\_LIMIT}, and unused caches shall expire after
+  \texttt{PREDICTED\_CACHE\_TTL}. \emph{Fit criterion:} a test predicts
+  caches that are never used and checks that memory stays within the limit.
+\end{description}
+
+\begin{table}[h]
+\centering
+\caption{New constants (values to be set by the team)}
+\label{tab:constants}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule Constant & Meaning\\\midrule
+\texttt{QUALITY\_LOSS\_LIMIT} & Largest accepted drop in task score for a
+cross-model setup. \todo{choose a value with the team and advisor}\\
+\texttt{CANARY\_TOKENS} & Number of final history tokens recomputed for
+the run-time check. \todo{choose a value}\\
+\texttt{CANARY\_LIMIT} & Largest accepted difference between the
+recomputed and predicted keys and values for those tokens.
+\todo{choose a value}\\
+\texttt{FALLBACK\_WINDOW} & Number of recent requests used to compute the
+fallback rate. \todo{choose a value}\\
+\texttt{FALLBACK\_RATE\_LIMIT} & Fallback rate above which reuse is turned
+off. \todo{choose a value}\\
+\texttt{QUEUE\_LIMIT} & Number of requests that may wait for prefill
+before further requests are rejected. \todo{choose a value}\\
+\texttt{PREDICTED\_CACHE\_LIMIT} & Memory allowed for predicted but unused
+caches. \todo{choose a value}\\
+\texttt{PREDICTED\_CACHE\_TTL} & Time after which an unused predicted cache
+expires. \todo{choose a value}\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Changes needed in the \srs{}.}
+\begin{itemize}
+  \item Add SR-09 to SR-14, their constants, and H8--H15 to the traceability
+  table, which resolves open issue OI6. FR-16 should also trace to H8, H13
+  and H15, not only H1 and H3.
+  \item \textbf{NFR-05 conflicts with H8.} NFR-05 requires every reuse
+  setup to match the native scores within \texttt{SCORE\_ATOL} and to
+  produce identical greedy tokens. The \srs{} itself states that cache
+  prediction may be approximate, so no cross-model setup could pass, and
+  FR-14 would never enable reuse. NFR-05
+  should keep the exact check for same-model reuse and use SR-09 and SR-10
+  for cross-model reuse. \todo{agree on this change with the SRS author}
+  \item Note in A1 that H9 is still analyzed (Section~\ref{sec:assumptions}).
+\end{itemize}
 
 \section{Roadmap}
+\label{sec:roadmap}
 
-\wss{Which safety requirements will be implemented as part of the capstone timeline?
-Which requirements will be implemented in the future?}
+Table~\ref{tab:roadmap} shows which requirements are planned within the
+capstone and which are left for later. Requirements for the capstone are
+the ones needed for a correct, safe single-server demonstration.
+
+\begin{table}[h]
+\centering
+\caption{Roadmap for the safety and security requirements}
+\label{tab:roadmap}
+\begin{tabularx}{\textwidth}{@{}p{0.27\textwidth}p{0.16\textwidth}X@{}}
+\toprule Requirements & When & Reason\\\midrule
+SR-01 to SR-08 & Capstone & Needed for any correct reuse; already in the
+\srs{}.\\
+SR-09, SR-10 & Capstone & Cross-model prediction is approximate (H8), so
+quality checks are part of the core product.\\
+SR-11 (checksum and source) & Capstone & Cheap to build and detects
+corruption.\\
+SR-12 (sharing-group limit) & Capstone & Configuration and documentation
+only.\\
+SR-13, SR-14 & Capstone, after the core path works & Needed for load tests,
+but depend on the reuse path.\\
+Signed caches and caches uploaded by users & Future & A1 excludes untrusted
+sources in the first release; accepting them would need authentication of
+the cache source.\\
+Timing side-channel defences, such as padding response times & Future &
+Costs part of the speedup; SR-12 reduces the risk for now.\\
+Hazards of operation across several servers & Future & Outside the
+\srs{} scope.\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\bibliographystyle{plain}
+\bibliography{../../refs/References}
 
 \newpage{}
 
 \section{Appendix --- Generative AI Use Disclosure}
 
-\wss{ChatGPT (version 5) was used to brainstorm ideas for the template for this disclose section.}
-
 \subsection{AI Tools Used}
 
-\wss{Give the name of the AI tool(s) used and the version.}
+Claude Code, running Claude Opus 5.5 (Anthropic).
 
 \subsection{How and Where Used}
 
-\wss{Explain what the tool(s) were used for.  Examples include: brainstorming,
-explaining a technical concept, reviewing the document, generating or modifying
-text, generating or modifying diagrams, identifying errors or omissions or
-inconsistencies.}
-
-\wss{For each of the uses, identify which parts of the document were affected.}
-
-\wss{You do not need to report every interaction, but you should disclose the 
-uses that materially contributed to your work}
+\begin{itemize}
+  \item \textbf{Drafting:} Claude drafted all sections of this document from
+  the team's SRS draft, the course Hazard Analysis lecture, the template and
+  the Hazard Analysis checklist. This includes the hazard list, the FMEA
+  table, SR-09 to SR-14 and the roadmap.
+  \item \textbf{Consistency checking:} Claude compared the SRS requirement
+  IDs and draft hazard labels with this document, and identified the
+  conflict between NFR-05 and approximate cross-model prediction.
+  \item \textbf{Literature:} Claude found the three papers cited for H8,
+  H9 and H10, and checked their titles, authors and the reported numbers on
+  the arXiv pages and the HeteroFold repository.
+\end{itemize}
 
 \subsection{Verification of AI-Generated Content}
 
-\wss{\begin{itemize}
-    \item Describe how the team checked AI-generated or AI-assisted material
-    before including it in the document.
-    \item In particular, verify factual claims, technical assertions,
-    requirements, calculations, references, and other information for which an
-    AI system may produce incorrect or fabricated results.
-    \item \textbf{The team is responsible for the accuracy, completeness,
-consistency, and appropriateness of the submitted document, regardless of
-whether material was generated by a human or an AI system.}
-\end{itemize}}
+The citations were checked against the arXiv abstract pages, and the
+H8 figures against the results table published with the HeteroFold code.
+The requirement IDs were checked against the SRS draft on the \texttt{SRS}
+branch. The team reviewed every hazard, FMEA row and new requirement
+before submission. The team is
+responsible for the accuracy, completeness and consistency of this
+document.
 
 \newpage{}
 
 \section{Appendix --- Reflection}
 
-\wss{Not required for CAS 741}
-
 \input{../Reflection.text}
 
 \begin{enumerate}
-    \item What went well while writing this deliverable? 
+    \item What went well while writing this deliverable?
+
+    After meeting with our supervisor, the team had a clear idea of the
+    project's direction. Identifying the hazards and losses went well
+    because, by this point, we also understood the technology well from
+    reviewing the state-of-the-art papers on KV cache reuse and cross-model
+    transfer, so we could see where the system could fail and who would be
+    affected.
+
     \item What pain points did you experience during this deliverable, and how
     did you resolve them?
+
+    The hardest part was coordinating between the writer of the SRS and the
+    writer of this Hazard Analysis, who worked at the same time and had to
+    agree on the functional, non-functional and security requirements. We
+    resolved this by using the SRS identifiers throughout this document and
+    collecting every change the SRS needs, including the new requirements
+    and the NFR-05 conflict, in Section~\ref{sec:requirements} so that the SRS
+    author could review and apply them in one place.
+
     \item Which of your listed risks had your team thought of before this
     deliverable, and which did you think of while doing this deliverable? For
     the latter ones (ones you thought of while doing the Hazard Analysis), how
     did they come about?
+
+    H1--H7 were identified before this
+    deliverable, while writing the SRS. They came from discussions within
+    the team and with our supervisor, and from research papers on KV cache
+    reuse, which showed when a cache can safely be reused. H8--H15 came up
+    during this analysis. H8 came from reading published cross-model
+    transfer results, which showed large and direction-dependent quality
+    loss. H10 came from work on timing leaks in prefix caching. H11 to H14
+    came from asking what happens when many requests fail at once, or when
+    predicted caches are never used. H15 came from the SRS assumption that a
+    predictor cheaper than prefill is still an open question.
+
     \item Other than the risk of physical harm (some projects may not have any
     appreciable risks of this form), list at least 2 other types of risk in
     software products. Why are they important to consider?
+
+    Privacy risk: software can reveal
+    information users expected to stay private, as in H2, H5 and H10, and
+    such a leak cannot be undone. Risk of misleading results: software that
+    produces confident but wrong output, as in H8 and H11, can lead people
+    to make poor decisions, because nothing tells them the output is
+    unreliable.
 \end{enumerate}
 
 \end{document}
