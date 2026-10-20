@@ -518,9 +518,8 @@ PUC6 & A request is cancelled or times out & Report its final status and release
 Functional requirements describe what Tandem must do; non-functional
 requirements describe its quality and performance. Each bullet states a
 requirement, how to check it, and why it matters. ``Shall'' means required.
-FR and NFR are requirement IDs. Names beginning with T identify planned tests;
-their detailed procedures belong in the Verification and Validation (V\&V)
-Plan. Draft accuracy and performance limits need team approval before final
+FR and NFR are requirement IDs. Detailed test procedures belong in the
+Verification and Validation (V\&V) Plan. Draft accuracy and performance limits need team approval before final
 tests; review them on development data (OI3), without changing thresholds
 to rescue failed final tests.
 
@@ -528,112 +527,112 @@ to rescue failed final tests.
 \item \phantomsection\label{req:FR-01}
 \textbf{FR-01 --- Check requests before processing}\par
 Tandem shall validate requests against the Data Dictionary and check request/cache sizes, references and formats against supported limits before allocating associated resources.\par
-\textbf{Check.} T-ADM rejects missing fields, unknown models, invalid settings, duplicate IDs and oversized prompts before generation, with reasons; valid cacheless requests pass. T-BOUND checks inconsistent lengths, invalid cache handles and unsupported formats; report rejection, native processing or failure without unlimited retries.\par
+\textbf{Check.} Verify that Tandem rejects missing fields, unknown models, invalid settings, duplicate IDs and oversized prompts before generation, with reasons; valid cacheless requests pass. Check inconsistent lengths, invalid cache handles and unsupported formats; report rejection, native processing or failure without unlimited retries.\par
 \textbf{Why.} Invalid inputs differ from cache misses.
 
 
 \item \phantomsection\label{req:FR-02}
 \textbf{FR-02 --- Use the requested model and inputs}\par
 Tandem shall preserve the router-selected model version, complete ordered prompt and accepted generation settings.\par
-\textbf{Check.} T-SEM compares these with native processing; no instruction or history is omitted.\par
+\textbf{Check.} Compare these with native processing; no instruction or history is omitted.\par
 \textbf{Why.} Preserve application intent.
 
 
 \item \phantomsection\label{req:FR-03}
 \textbf{FR-03 --- Match the shared history exactly}\par
 Tandem shall reuse only an exact history prefix in the selected model's formatting and tokenization.\par
-\textbf{Check.} T-MATCH varies messages/order, system instructions, tokenizer/format versions and positions; relevant mismatches block reuse. The latest turn remains new input.\par
+\textbf{Check.} Vary messages/order, system instructions, tokenizer/format versions and positions; relevant mismatches block reuse. The latest turn remains new input.\par
 \textbf{Why.} Semantic similarity or equal sizes are insufficient.
 
 
 \item \phantomsection\label{req:FR-04}
 \textbf{FR-04 --- Validate a KV cache before reuse}\par
 Tandem shall load a predicted KV cache only after the reuse checks below pass.\par
-\textbf{Check.} T-COMP fails each check independently, then accepts a valid cache. Missing evidence, unsupported versions, invalid shapes and nonfinite tensors block reuse without requiring runtime native-KV comparison.\par
+\textbf{Check.} Make each reuse check fail independently, then confirm that a valid cache is accepted. Missing evidence, unsupported versions, invalid shapes and nonfinite tensors block reuse without requiring runtime native-KV comparison.\par
 \textbf{Why.} Ensure cache eligibility.
 
 
 \item \phantomsection\label{req:FR-05}
 \textbf{FR-05 --- Load predicted KV state and prefill the remaining prompt}\par
 Tandem shall load accepted predicted KV, prefill the uncached suffix once in order and decode with the selected target model.\par
-\textbf{Check.} T-REUSE verifies covered history, suffix positions and actual prompt work; outputs pass \hyperref[req:NFR-05]{\texttt{NFR-05}}.\par
+\textbf{Check.} Verify covered history, suffix positions and actual prompt work; outputs pass \hyperref[req:NFR-05]{\texttt{NFR-05}}.\par
 \textbf{Why.} Replace target-prefix prefill in actual serving.
 
 
 \item \phantomsection\label{req:FR-06}
 \textbf{FR-06 --- Keep normal processing available}\par
 Tandem shall retain native processing, including existing prefix caching, when reuse is disabled, unavailable or unsuitable.\par
-\textbf{Check.} T-NATIVE checks same-model turns, unshared history, missing caches and unsupported pairs against native output rules.\par
+\textbf{Check.} Check same-model turns, unshared history, missing caches and unsupported pairs against native output rules.\par
 \textbf{Why.} Cache misses must not invalidate requests.
 
 
 \item \phantomsection\label{req:FR-07}
 \textbf{FR-07 --- Recover from or report a prediction/reuse failure}\par
 Tandem shall use the recovery rules below when prediction, validation or cache loading fails.\par
-\textbf{Check.} T-FAIL injects predictor exceptions, invalid tensors/loading failures before output and execution failures afterwards. At most one safe native restart is allowed before output, retaining the request ID without duplicate output; otherwise report failure. Never combine failed-attempt and restarted output as one successful response.\par
+\textbf{Check.} Inject predictor exceptions, invalid tensors/loading failures before output and execution failures afterwards. At most one safe native restart is allowed before output, retaining the request ID without duplicate output; otherwise report failure. Never combine failed-attempt and restarted output as one successful response.\par
 \textbf{Why.} Prevent retry loops and mixed answers.
 
 
 \item \phantomsection\label{req:FR-08}
 \textbf{FR-08 --- Keep output attached to the right request}\par
 Tandem shall return ordered output under the correct request ID and exactly one final status per accepted request.\par
-\textbf{Check.} T-STATE overlaps requests, cancellations and failures; accepted requests end completed, failed or cancelled, with separate rejection records.\par
+\textbf{Check.} Run overlapping requests, cancellations and failures; accepted requests end completed, failed or cancelled, with separate rejection records.\par
 \textbf{Why.} Prevent mixed or duplicate responses.
 
 
 \item \phantomsection\label{req:FR-09}
 \textbf{FR-09 --- Release memory when a request ends}\par
 Tandem shall release ended requests' resources while preserving cache state needed by active requests.\par
-\textbf{Check.} T-LIFE repeats completion, failure and cancellation for 100 cycles; no ended request retains its allocation and active outputs remain correct. Policy-retained reusable caches are allowed.\par
+\textbf{Check.} Repeat completion, failure and cancellation for 100 cycles; no ended request retains its allocation and active outputs remain correct. Policy-retained reusable caches are allowed.\par
 \textbf{Why.} Prevent leaks without discarding useful caches.
 
 
 \item \phantomsection\label{req:FR-10}
 \textbf{FR-10 --- Record what happened for each request}\par
 Tandem shall record run and request IDs, source and target models, predictor version, timings, actual prompt work, final status, and the reuse decision and reason in structured results.\par
-\textbf{Check.} T-METRIC checks fields and counts against a known prompt; unavailable measurements have a missing-value reason, not an estimate.\par
+\textbf{Check.} Check fields and counts against a known prompt; unavailable measurements have a missing-value reason, not an estimate.\par
 \textbf{Why.} Expose saved work and failures.
 
 
 \item \phantomsection\label{req:FR-11}
 \textbf{FR-11 --- Use matching requests for comparisons}\par
 Test tools shall compare the same requests, routing decisions, arrival times and generation settings with and without Tandem.\par
-\textbf{Check.} T-EVAL checks configuration/request records; unexplained differences invalidate comparisons. Baseline prefix caching remains equally enabled.\par
+\textbf{Check.} Check configuration/request records; unexplained differences invalidate comparisons. Baseline prefix caching remains equally enabled.\par
 \textbf{Why.} Ensure a fair baseline.
 
 
 \item \phantomsection\label{req:FR-12}
 \textbf{FR-12 --- Make comparison results repeatable}\par
 Test tools shall report KV error, prediction and response times, throughput, prompt work, total GPU time, GPU time per completed request, output differences and fallback outcomes for individual requests and the complete run.\par
-\textbf{Check.} T-REPORT checks versions, hardware, models, predictor/checkpoint, splits, seeds, requests, repetitions, cache preparation and failures. Include prediction/validation/loading overhead; separate offline costs and calculate priced estimates under Costs.\par
+\textbf{Check.} Check versions, hardware, models, predictor/checkpoint, splits, seeds, requests, repetitions, cache preparation and failures. Include prediction/validation/loading overhead; separate offline costs and calculate priced estimates under Costs.\par
 \textbf{Why.} Make results reproducible.
 
 
 \item \phantomsection\label{req:FR-13}
 \textbf{FR-13 --- Control supported cache-reuse setups}\par
 Tandem shall validate settings, provide a prediction on/off switch, and record approved model pairs, predictor versions, checkpoints and limits.\par
-\textbf{Check.} T-CONFIG rejects inconsistent settings, uses native processing for untested combinations and invalidates incompatible caches after changes.\par
+\textbf{Check.} Verify that Tandem rejects inconsistent settings, uses native processing for untested combinations and invalidates incompatible caches after changes.\par
 \textbf{Why.} Model loading alone does not qualify reuse.
 
 
 \item \phantomsection\label{req:FR-14}
 \textbf{FR-14 --- Test a setup before enabling reuse}\par
 Tandem shall enable a setup only after recording KV prediction error and passing output, privacy and failure-handling tests.\par
-\textbf{Check.} T-QUAL blocks missing/failed evidence and records held-out evaluation, predictor/parameter versions, splits and limits. Fitting and final evaluation use separate conversation groups.\par
+\textbf{Check.} Verify that missing or failed evidence prevents setup approval. Record held-out evaluation, predictor and parameter versions, data splits and limits. Fitting and final evaluation use separate conversation groups.\par
 \textbf{Why.} Qualify accuracy before speed claims.
 
 
 \item \phantomsection\label{req:FR-15}
 \textbf{FR-15 --- Stop cancelled or timed-out requests}\par
 Tandem shall support cancellation and enforce configured request timeouts.\par
-\textbf{Check.} T-CANCEL cancels queued and running requests and tests requests exceeding the configured timeout (120 seconds by default). Each stops safely, records the right reason and releases resources under \hyperref[req:FR-09]{\texttt{FR-09}}.\par
+\textbf{Check.} Cancel queued and running requests, and test requests exceeding the configured timeout (120 seconds by default). Each stops safely, records the right reason and releases resources under \hyperref[req:FR-09]{\texttt{FR-09}}.\par
 \textbf{Why.} Running GPU operations need safe stopping points.
 
 
 \item \phantomsection\label{req:FR-16}
 \textbf{FR-16 --- Predict target-model KV caches from source-model KV caches}\par
 Tandem shall predict the target model's key and value tensors from the source KV cache and alignment metadata for the shared history. It shall use an approved model pair and predictor version, without running target-model prefill over that history to construct the prediction.\par
-\textbf{Check.} T-PRED checks held-out prefix/layout/model metadata and per-layer/group KV error against offline native references. Instrumentation confirms skipped target-prefix prefill; loading/output pass \hyperref[req:FR-05]{\texttt{FR-05}} and \hyperref[req:NFR-05]{\texttt{NFR-05}}. Record architecture, parameters and fitting procedure.\par
+\textbf{Check.} Using held-out conversations, check the prefix, cache layout and model metadata, and measure KV error for each layer or cache group against offline native references. Instrumentation confirms skipped target-prefix prefill; loading/output pass \hyperref[req:FR-05]{\texttt{FR-05}} and \hyperref[req:NFR-05]{\texttt{NFR-05}}. Record architecture, parameters and fitting procedure.\par
 \textbf{Why.} Source-to-target KV prediction is Tandem's core function.
 \end{itemize}
 
@@ -725,7 +724,7 @@ Ordinary requests use the existing serving interface; only technical users confi
 \item \phantomsection\label{req:NFR-02}
 \textbf{NFR-02 --- Make setup instructions usable}\par
 A technical user with the listed prerequisites shall be able to install Tandem and run the basic example by following its instructions.\par
-\textbf{Check.} T-USABILITY has an independent reviewer follow all documented commands/results in a clean supported environment.\par
+\textbf{Check.} Have an independent reviewer follow all documented commands/results in a clean supported environment.\par
 \textbf{Why.} Operators need repeatable setup.
 \end{itemize}
 
@@ -746,7 +745,7 @@ Messages identify outcomes, invalid fields and corrective actions without exposi
 \item \phantomsection\label{req:NFR-01}
 \textbf{NFR-01 --- Make results readable}\par
 Tandem shall provide readable results with clear field names and units, plus structured data that other programs can read.\par
-\textbf{Check.} T-REPORT distinguishes reuse, native processing, fallback and failure without inspecting engine internals.\par
+\textbf{Check.} Verify that reports distinguish reuse, native processing, fallback and failure without inspecting engine internals.\par
 \textbf{Why.} Developers/operators need understandable results.
 \end{itemize}
 
@@ -768,7 +767,7 @@ consistently. Separate predictor/loading/engine timings and offline development
 costs, and retain failures and cancellations.
 
 Compare median TTFT, p95 TTFT (the 95th-percentile wait) and successful
-requests per second against the native engine. T-STAT estimates confidence
+requests per second against the native engine. Estimate confidence
 intervals at the draft 95\% confidence level using 2,000 bootstrap resamples
 of complete paired trials; record the random seed. Requests within one trial are not independent
 repetitions. Use the conservative interval bounds to decide whether an
@@ -778,7 +777,7 @@ improvement or allowed slowdown has been demonstrated.
 \item \phantomsection\label{req:NFR-04}
 \textbf{NFR-04 --- Show a useful reduction in waiting time}\par
 On at least one preselected model-switch workload, Tandem shall reduce computed prompt work and median TTFT beyond timing variation.\par
-\textbf{Check.} T-PERF requires fewer computed prompt tokens and a confidence interval confirming lower median TTFT, with passing output checks and no additional failures. Report all workloads, including slowdowns.\par
+\textbf{Check.} Require fewer computed prompt tokens and a confidence interval confirming lower median TTFT, with passing output checks and no additional failures. Report all workloads, including slowdowns.\par
 \textbf{Why.} Demonstrate measured benefit.
 \end{itemize}
 
@@ -795,14 +794,14 @@ cannot prove accuracy, and output consistency does not prove factual correctness
 \item \phantomsection\label{req:NFR-05}
 \textbf{NFR-05 --- Keep the selected model's output consistent}\par
 Each approved setup shall pass the logit and generated-token checks in the KV prediction and reuse rules on its declared test set.\par
-\textbf{Check.} T-SCORE applies the draft logit tolerances in the accuracy checks above. T-GEN requires identical greedy tokens for 32 tokens or an earlier shared stop. Mismatches prevent approval; do not change limits after failed final tests.\par
+\textbf{Check.} Apply the draft logit tolerances in the accuracy checks above. Require identical greedy output for 32 tokens or an earlier shared stop. Mismatches prevent approval; do not change limits after failed final tests.\par
 \textbf{Why.} Draft tolerances need OI3 review.
 
 
 \item \phantomsection\label{req:NFR-03}
 \textbf{NFR-03 --- Preserve supported text}\par
 Tandem shall preserve valid Unicode text through the selected model's normal conversation formatting and tokenization.\par
-\textbf{Check.} T-TEXT checks accents, non-Latin scripts, whitespace and delimiters; prompt tokens equal native processing.\par
+\textbf{Check.} Check accents, non-Latin scripts, whitespace and delimiters; prompt tokens equal native processing.\par
 \textbf{Why.} Prevent false prefix matches.
 \end{itemize}
 
@@ -814,7 +813,7 @@ A failed optional prediction uses native processing when possible; unavailable m
 \item \phantomsection\label{req:NFR-06}
 \textbf{NFR-06 --- Report failures and allow later normal requests}\par
 Tandem shall explain failures and retain native processing after recoverable cache errors.\par
-\textbf{Check.} T-FAIL injects incomplete/mismatched caches, allocation failures and timeouts; follow \hyperref[req:FR-07]{\texttt{FR-07}}. Later valid requests complete if the engine remains healthy; unrecoverable engines require operator action.\par
+\textbf{Check.} Inject incomplete/mismatched caches, allocation failures and timeouts; follow \hyperref[req:FR-07]{\texttt{FR-07}}. Later valid requests complete if the engine remains healthy; unrecoverable engines require operator action.\par
 \textbf{Why.} Recovery requires a working engine/resources.
 \end{itemize}
 
@@ -825,14 +824,14 @@ Publish and test the supported prompt lengths, concurrency and memory limits for
 \item \phantomsection\label{req:NFR-07}
 \textbf{NFR-07 --- Handle more requests without excessive delay}\par
 On at least one preselected shared-history workload, Tandem shall improve throughput within the permitted p95 TTFT increase.\par
-\textbf{Check.} T-LOAD requires confidence intervals showing higher throughput and a p95 TTFT increase no greater than 5\% of the native value, with no extra failures. Record requests and arrival times.\par
+\textbf{Check.} Require confidence intervals showing higher throughput and a p95 TTFT increase no greater than 5\% of the native value, with no extra failures. Record requests and arrival times.\par
 \textbf{Why.} Capacity gains must retain acceptable delay.
 
 
 \item \phantomsection\label{req:NFR-08}
 \textbf{NFR-08 --- Limit slowdowns for normal requests}\par
 For requests that do not use prediction, Tandem shall keep latency increases and throughput losses within the allowed limit.\par
-\textbf{Check.} T-NATIVE-PERF uses the conservative confidence-interval bounds: median and p95 TTFT may increase by at most 5\% of their native values, and throughput may fall by at most the same fraction. Excess uncertainty is inconclusive.\par
+\textbf{Check.} Use the conservative confidence-interval bounds: median and p95 TTFT may increase by at most 5\% of their native values, and throughput may fall by at most the same fraction. Excess uncertainty is inconclusive.\par
 \textbf{Why.} Bound integration overhead.
 \end{itemize}
 
@@ -843,7 +842,7 @@ The initial scope is one server and tested model pairs; extra GPUs, model famili
 \item \phantomsection\label{req:NFR-09}
 \textbf{NFR-09 --- Publish supported models and limits}\par
 Each release shall list tested setups, limits on simultaneous requests and tokens, and unsupported settings.\par
-\textbf{Check.} T-QUAL tests boundaries and just-beyond values; support claims require evidence. Untested setups remain experimental or disabled.\par
+\textbf{Check.} Test boundaries and just-beyond values; support claims require evidence. Untested setups remain experimental or disabled.\par
 \textbf{Why.} Distinguish tested support.
 \end{itemize}
 
@@ -866,7 +865,7 @@ GPU results require the recorded Linux/model/software setup; local CPU checks do
 \item \phantomsection\label{req:NFR-10}
 \textbf{NFR-10 --- Record how to recreate the test setup}\par
 Each tested release shall record the hardware, software and commands needed to recreate the setup on compatible hardware.\par
-\textbf{Check.} T-REPRO rebuilds and runs basic/output tests; identify model/dependency/build versions and report hardware/competing-load differences for performance repeats.\par
+\textbf{Check.} Rebuild the setup and run basic and output tests; identify model/dependency/build versions and report hardware/competing-load differences for performance repeats.\par
 \textbf{Why.} Setup affects timing and output.
 \end{itemize}
 
@@ -900,7 +899,7 @@ Use repository issues with version details, error codes and non-private reproduc
 \item \phantomsection\label{req:NFR-12}
 \textbf{NFR-12 --- Explain status and error codes}\par
 The release shall explain rejection, fallback and failure codes, including what the operator should do or whether no action is needed.\par
-\textbf{Check.} T-DIAG compares codes with triggered outcomes; diagnostics identify the setup for reproduction while meeting \hyperref[req:SR-06]{\texttt{SR-06}}.\par
+\textbf{Check.} Compare codes with triggered outcomes; diagnostics identify the setup for reproduction while meeting \hyperref[req:SR-06]{\texttt{SR-06}}.\par
 \textbf{Why.} Distinguish unused caches from failed requests.
 \end{itemize}
 
@@ -920,13 +919,13 @@ Use only complete, current caches and protect state needed by active requests.
 \par\medskip\noindent\phantomsection\label{req:SR-02}
 \textbf{SR-02 --- Do not use incomplete or incompatible caches}\par
 Tandem shall reject incomplete, inconsistent, outdated, unsupported or unqualified caches.\par
-\textbf{Fit criterion.} T-COMP varies each condition; rejected caches never enter generation. Use native processing or report server/resource failure; missing evidence means unsupported.\par
+\textbf{Fit criterion.} Vary each condition; rejected caches never enter generation. Use native processing or report server/resource failure; missing evidence means unsupported.\par
 \textbf{Source and rationale.} C4, BR6; prevent invalid cache use.
 
 \par\medskip\noindent\phantomsection\label{req:SR-03}
 \textbf{SR-03 --- Protect caches still in use}\par
 Tandem shall protect active caches from invalidating removal, modification or reassignment.\par
-\textbf{Fit criterion.} T-LIFE overlaps generation, cancellation and cache replacement/eviction; outputs pass \hyperref[req:NFR-05]{\texttt{NFR-05}} and cleanup passes \hyperref[req:FR-09]{\texttt{FR-09}}.\par
+\textbf{Fit criterion.} Overlap generation, cancellation and cache replacement/eviction; outputs pass \hyperref[req:NFR-05]{\texttt{NFR-05}} and cleanup passes \hyperref[req:FR-09]{\texttt{FR-09}}.\par
 \textbf{Source and rationale.} G2, G4; preserve active state.
 
 \subsection{Privacy Requirements}
@@ -936,25 +935,25 @@ content out of normal logs. Published tests use public or synthetic data.
 \par\medskip\noindent\phantomsection\label{req:SR-01}
 \textbf{SR-01 --- Allow only permitted history sharing}\par
 Tandem shall reuse history only with host-granted sharing permission.\par
-\textbf{Fit criterion.} T-ISOLATION uses matching histories across groups and request-controlled permission changes; unauthorized caches are neither used nor exposed.\par
+\textbf{Fit criterion.} Use matching histories across groups and request-controlled permission changes; unauthorized caches are neither used nor exposed.\par
 \textbf{Source and rationale.} BR3; protect private history.
 
 \par\medskip\noindent\phantomsection\label{req:SR-04}
 \textbf{SR-04 --- Keep private instructions and answers separate}\par
 Tandem shall exclude other requests' private instructions/answers from reused history.\par
-\textbf{Fit criterion.} T-ISOLATION varies another request's private instructions while fixing the current request; scores pass \hyperref[req:NFR-05]{\texttt{NFR-05}}, greedy tokens match and native controls pass.\par
+\textbf{Fit criterion.} Vary another request's private instructions while fixing the current request; scores pass \hyperref[req:NFR-05]{\texttt{NFR-05}}, greedy tokens match and native controls pass.\par
 \textbf{Source and rationale.} BR3; shared history grants no access to later private text.
 
 \par\medskip\noindent\phantomsection\label{req:SR-05}
 \textbf{SR-05 --- Invalidate old caches after restart or setup changes}\par
 The first release shall restrict caches to the serving lifetime and invalidate references after restart/incompatible configuration changes.\par
-\textbf{Fit criterion.} T-RESTART rejects old references; default exports contain no prompts/caches.\par
+\textbf{Fit criterion.} Verify that Tandem rejects old references; default exports contain no prompts/caches.\par
 \textbf{Source and rationale.} BR3; host handles physical GPU-memory erasure.
 
 \par\medskip\noindent\phantomsection\label{req:SR-06}
 \textbf{SR-06 --- Keep private contents out of normal logs}\par
 Normal logs/measurements shall retain IDs/reasons but omit raw prompts, answers, KV, credentials and request-controlled secrets.\par
-\textbf{Fit criterion.} T-PRIVACY checks exports for injected secrets. Detailed output traces require explicit enablement, public/synthetic data and a declared retention period.\par
+\textbf{Fit criterion.} Check exports for injected secrets. Detailed output traces require explicit enablement, public/synthetic data and a declared retention period.\par
 \textbf{Source and rationale.} BR3; minimize sensitive records.
 
 \subsection{Audit Requirements}
@@ -1109,13 +1108,13 @@ Provide repository instructions for installation, operation, testing and trouble
 \par\medskip\noindent\phantomsection\label{req:DR-01}
 \textbf{DR-01 --- Explain installation and operation}\par
 The release shall document prerequisites, supported setups, fields, reuse controls, native processing, errors, rollback and a repeatable example.\par
-\textbf{Fit criterion.} T-DOC checks coverage, limits/problems and independent example execution under \hyperref[req:NFR-02]{\texttt{NFR-02}}.\par
+\textbf{Fit criterion.} Check coverage, limits/problems and independent example execution under \hyperref[req:NFR-02]{\texttt{NFR-02}}.\par
 \textbf{Source and rationale.} Technical users need operational guidance.
 
 \par\medskip\noindent\phantomsection\label{req:DR-02}
 \textbf{DR-02 --- Explain test results}\par
 The release shall explain reproducing/interpreting native--Tandem tests, including cache preparation, uncertainty, failures and output tolerances.\par
-\textbf{Fit criterion.} T-DOC traces a sample report to settings/individual results and distinguishes pass, failure and inconclusive outcomes.\par
+\textbf{Fit criterion.} Trace a sample report to its settings and individual results, and distinguish pass, failure and inconclusive outcomes.\par
 \textbf{Source and rationale.} G1--G4; make evidence assessable.
 
 
