@@ -836,39 +836,38 @@ PUC6 & A request is cancelled or times out & Report its final status and release
 \end{longtable}
 
 \subsection{Individual Product Use Cases (PUC's)}
-Figure~\ref{fig:product-use-cases} shows the independent goals of one actor:
-a Data Center Server Operator. The operator is outside Tandem's system
-boundary. Each oval names a useful action that the operator can perform;
-each solid line connects the operator to that action. Their placement does
-not specify an execution order.
+Figure~\ref{fig:product-use-cases} focuses on Tandem's central inference
+use case: performing LLM inference after a model switch. The external
+actor is the host inference service's request handler, which calls the
+Tandem predictor and inference integration. It supplies the routed request
+and access to the source KV cache. vLLM Semantic Router has already selected
+the target model; Tandem does not make that selection.
 
-\begin{itemize}
-\item \textbf{Configure KV prediction settings:} register approved predictor
-versions and the model pairs they support, set resource limits and enable or
-disable prediction. The router's configuration defines available inference
-backends and routing policy; the router selects the target model for each
-request. The existing source KV cache identifies the source model. Tandem
-uses that source/target pair to find an approved predictor; it does not
-choose the target model.
-\item \textbf{Inspect prediction, fallback and error status:} use the
-recorded request results and diagnostic messages to investigate what happened.
-\item \textbf{Evaluate KV prediction accuracy and serving performance:}
-run controlled comparisons with native target-model processing to measure
-prediction error, output differences, latency and GPU use.
-\item \textbf{Review evaluation results and compute-cost estimates:}
-inspect saved reports, including their assumptions, failed cases and limits.
-\end{itemize}
+The illustrated scenario starts with a valid request, prediction enabled,
+source KV state available and a supported source/target predictor setup.
+The \emph{include} arrows identify capabilities required by this scenario:
+predicting target KV state from source KV state and generating the response
+with the selected target model. The main use case checks the prediction,
+loads accepted state and prefills the uncached prompt suffix before decoding.
+These compatibility and loading steps remain in the written scenario rather
+than becoming separate ovals.
 
-No \emph{include} or \emph{extend} relationship is needed between these
-independent goals. Predicting tensors, checking compatibility, loading KV
-state and falling back to native processing are internal behaviour described
-in the relevant scenarios below and in the state diagram. They are not
-separate operator goals in this diagram.
+The \emph{extend} arrow points from native target-model prefill to the main
+use case. This adds fallback at the extension point \emph{Prepare target KV
+state} when prediction is rejected or fails, or loading fails before any
+output is returned. Existing native prefix caching remains available. If a
+safe fallback is impossible, the request reports failure. Once output has
+started, a failure is reported without appending a restarted answer.
+
+If the initial prediction conditions are absent, the request uses normal
+processing as described in the use cases below. The solid actor association
+and dashed use-case relationships do not specify execution order; the state
+diagram describes the runtime flow.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth,height=0.78\textheight,keepaspectratio]{figures/TandemUseCaseDiagram.png}
-\caption{Tandem use cases for a Data Center Server Operator: configure KV prediction, inspect status, evaluate accuracy and performance, and review results.}
+\includegraphics[width=\linewidth,height=0.78\textheight,keepaspectratio]{figures/Tandem Use Case Diagram.drawio.png}
+\caption{Perform LLM inference after a model switch using source-to-target KV prediction, with required prediction and response generation and conditional native-prefill fallback.}
 \label{fig:product-use-cases}
 \end{figure}
 
