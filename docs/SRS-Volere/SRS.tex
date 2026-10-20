@@ -50,6 +50,7 @@
 \midrule
 Oct 18, 2026 & 0.1 & Draft requirements for the current Tandem scope.\\
 Oct 19, 2026 & 0.2 & Make source-to-target KV cache prediction central to the scope, requirements, evaluation and workflow diagram.\\
+Oct 19, 2026 & 0.3 & Condense supporting sections while retaining requirements, diagrams and acceptance criteria.\\
 \bottomrule
 \end{tabularx}
 
@@ -60,118 +61,57 @@ Oct 19, 2026 & 0.2 & Make source-to-target KV cache prediction central to the sc
 
 
 \subsection{User Business}
-Tandem is intended for people who build or run applications that use more
-than one large language model (LLM). For example, a customer-support chatbot might send
-simple questions to a smaller model and harder questions to a more capable
-model. Choosing a model based on the meaning or needs of a request is called
-\emph{semantic routing}. In the planned deployment, vLLM Semantic Router
-selects the target model and routes the request to its inference backend.
-It is a routing component in the vLLM ecosystem, separate from the backend's
-prefill and decoding execution \hyperref[src:VSR]{[VSR]}.
+Tandem develops a predictor that estimates a target large language model's
+key-value (KV) cache from a source model's KV cache for the same conversation
+prefix. This aims to avoid repeated target-model prefill when a conversation
+switches models, reducing GPU compute and time to first token.
 
-Using a trained model to produce an answer is called \emph{inference}.
-During \emph{prefill}, the model processes the input prompt, including the
-conversation history. During \emph{decoding}, it generates the response one
-token at a time. When a conversation switches models, the newly selected
-model may need to repeat prefill for history that an earlier model has
-already processed. This adds response latency and uses GPU compute.
+In the planned deployment, vLLM Semantic Router selects the target model
+\hyperref[src:VSR]{[VSR]}. Tandem checks and loads the prediction, then the
+engine prefills the uncached suffix and decodes the response. Unsupported or
+failed predictions use native processing. Prediction may be approximate;
+KV error, output effects and total serving cost must be measured.
 
-Tandem's central task is \emph{cross-model key-value (KV) cache prediction}:
-use a source model's KV cache to predict the KV cache that the selected target
-model would produce for the same conversation prefix. A KV cache stores the
-key and value tensors produced by attention layers for processed tokens.
-The predictor estimates the target model's attention state from the source
-state, rather than obtaining that state by running target-model prefill over
-the shared history again.
+The project includes predictor development, any required fitting/training
+and integration on one GPU-equipped server. Base LLM weights remain frozen;
+older scope documents require alignment under OI5.
 
-Tandem includes development and evaluation of this predictor and its
-integration into the inference engine. If a predicted cache passes the
-runtime checks for a supported model pair and predictor version, Tandem loads
-it into the target model's KV memory, prefills the uncached prompt suffix and
-continues decoding. Cache prediction may be approximate: tensor error and its
-effect on model outputs must be measured against the target model's native
-prefill baseline. A cache with the right shape is not automatically accurate.
-If prediction is unsupported, unavailable or fails the runtime checks, the
-engine uses its \emph{native prefill} path.
-The initial project runs on one GPU-equipped server and is used by other
-software through an application programming interface (API).
-
-This SRS follows the team's clarified scope of predicting target KV state
-from source KV state. Earlier project documents that describe only integration
-of a supplied cache must be aligned with this scope under OI5.
 
 \subsection{Goals of the Project}
-Tandem aims to make applications that switch between language models cheaper
-and faster to run. Building on the model-switching problem
-in~\hyperref[src:PS]{[PS]} and the team's clarified prediction scope,
-the project has four main goals:
+Tandem addresses repeated prefill after model switches~\hyperref[src:PS]{[PS]}:
 \begin{description}
-\item[G1: Predict the target model's KV cache from the source cache.]
-Develop and evaluate a predictor that estimates target-model key and value
-tensors for the shared conversation prefix using the source model's KV
-tensors. Integrate the predicted state into the target engine so it can avoid
-repeating prefix prefill for supported model pairs and predictor versions.
-\item[G2: Reduce inference compute and serving cost.] Avoid repeated prefill to
-reduce the GPU computation needed per completed request. Aim to lower the GPU
-time and cost needed to serve the same workload, counting the work needed to
-run the predictor, validate its output and load the predicted KV cache.
-\item[G3: Make switching to cheaper models worthwhile.] Help an application
-benefit from using a lower-cost model when it is suitable for the task, without
-repeated processing of the conversation history using up those savings.
-Semantic routing selects the model; Tandem reduces the repeated prefill
-caused by the switch.
-\item[G4: Lower TTFT and increase throughput.] Reduce \emph{time to first
-token (TTFT)}, the wait before the selected model starts returning its answer.
-Use the saved computing capacity to increase \emph{throughput}, measured as
-completed requests per second on the same hardware, while keeping response
-latency within the agreed limits.
+\item[G1: Predict target KV from source KV.] Develop and integrate a predictor
+that lets supported target models reuse the shared history without repeating
+prefix prefill.
+\item[G2: Reduce compute and serving cost.] Lower GPU time per completed
+request after counting prediction, validation and cache-loading overhead.
+\item[G3: Support economical model switching.] Preserve the benefit of routing
+suitable requests to cheaper models by reducing repeated history processing.
+\item[G4: Improve latency and throughput.] Lower time to first token (TTFT)
+and increase completed requests per second within the agreed latency limits.
 \end{description}
-For example, a chatbot could use a larger model for a difficult question and
-switch to a cheaper model for a simple follow-up. Tandem uses the first
-model's cached keys and values to predict the cheaper model's KV state for
-that history, then processes the uncached part of the new request normally.
+Matched native/Tandem tests measure KV error, output effects, actual prompt
+work, GPU time, latency and throughput. Cost claims state rates and assumptions;
+router-selection savings are reported separately. Output accuracy, privacy
+and native fallback remain required.
 
-Tests will compare the same requests and model choices with and without
-Tandem. They will report repeated prompt work, GPU time per completed request,
-prediction error, predictor latency, TTFT, end-to-end latency and throughput.
-Estimated money savings must state the rates
-and assumptions used. Any separate savings attributed to choosing a cheaper
-model must identify the alternative model choices being compared.
-
-Correct output, privacy and normal processing when reuse is unavailable remain
-required conditions for achieving these goals. Supporting more models,
-handling more conversation branches and reducing peak GPU memory use are
-possible extensions after the core work succeeds.
 
 \section{Stakeholders}
 
 
 \subsection{Client}
-A potential client is a software company building an application that uses
-several language models. Cursor, whose AI development tools support multiple
-models, is the organizational example used in the personas below
-\hyperref[src:CURSOR]{[CURSOR]}. A customer-support chatbot company is another
-example. Such a development team could help define useful requirements,
-including which model combinations matter and how much delay users will accept.
+A potential client is a multi-model application company such as
+Cursor~\hyperref[src:CURSOR]{[CURSOR]}, whose team could help identify useful
+model combinations, acceptable response delays and cost-saving goals; this
+is a proposed adoption scenario, not a confirmed partnership.
 
-In this SRS, the \emph{client} is the organization whose application needs
-help guide Tandem's features. A university research lab developing a similar
-assistant is another potential client. These are examples of organizations
-that could benefit from the project; a current contract is not required.
 
 \subsection{Customer}
-A potential customer is an AI hosting provider that runs large language models
-for other software teams. Together AI, which offers dedicated model inference,
-is the organizational example used in the personas below
-\hyperref[src:TOGETHER]{[TOGETHER]}. Another is a company's internal AI
-infrastructure team. An organization operating a compatible inference engine
-could adopt Tandem to reduce repeated prefill after a router switches models
-and handle more requests with its available GPUs.
+A potential customer is an inference provider such as
+Together AI~\hyperref[src:TOGETHER]{[TOGETHER]} or an internal AI infrastructure
+team that could deploy Tandem to serve more requests with its GPUs; adoption
+of the planned open-source software does not require a licence purchase.
 
-Here, the \emph{customer} is the person or organization that would adopt and
-operate Tandem. The client and customer may be the same organization: a software
-company could both build the chatbot and run its model servers. Since Tandem
-is planned as an open-source project, adoption does not require buying a licence.
 
 \subsection{Other Stakeholders}
 Other people who could benefit include:
@@ -185,27 +125,12 @@ when sharing cached calculations is useful and when it is ineffective.
 \end{itemize}
 
 \subsection{Hands-On Users of the Project}
-Tandem is intended to be integrated into an LLM inference engine such as
-vLLM. Its users include inference-engine developers who maintain the
-integration, infrastructure operators who deploy it, researchers who evaluate
-it, and application developers who use the hosting system. The personas in
-the next subsection represent these roles: Alex Morgan, Together AI's
-inference operations team, Sofia Nguyen and Cursor's application team,
-respectively.
+Engine developers integrate the predictor; operators configure approved
+predictors and resource limits; researchers evaluate results; application
+developers use the existing serving interface. Technical users need Linux,
+LLM-serving and GPU knowledge. vLLM Semantic Router selects the target model,
+and application end users need no knowledge of Tandem.
 
-Engine developers integrate the KV predictor, validate its output and load
-predicted target KV state. Operators
-configure supported model pairs, enable or disable reuse, monitor GPU resources
-and investigate errors. Researchers compare the same workloads with and
-without Tandem. Application developers submit requests through the hosting
-inference system's existing API or programmatic interface; they do not need
-a separate Tandem API. Model selection remains the responsibility of the
-configured router, with vLLM Semantic Router used in the planned deployment.
-
-Operators and researchers need basic Linux skills and familiarity with model
-serving and GPU resource limits. Developers modifying the integration also
-need knowledge of the engine and KV cache handling. People chatting with an
-application benefit indirectly and do not need to understand or operate Tandem.
 
 \subsection{Personas}
 The following profiles represent potential users of Tandem. Cursor and
@@ -293,42 +218,22 @@ to reproduce results and distinguish estimated cost savings from measured GPU
 time.
 
 \subsection{Priorities Assigned to Users}
-Keeping responses consistent with normal model processing and protecting
-private information come first. A speed improvement is not acceptable if it
-uses the wrong history or exposes another user's information. These needs
-apply to Cursor's application scenario, Together AI's hosting scenario,
-Alex Morgan's engine integration and Sofia Nguyen's evaluation results.
+Output accuracy and privacy take priority, followed by reliable fallback,
+lower inference cost and latency, higher capacity and reproducible evidence;
+these priorities apply across the four personas.
 
-Next, Together AI's operations team and Alex Morgan represent the need to
-disable reuse and keep native processing available. After those needs are met,
-Cursor and Together AI represent the need for lower inference cost, shorter waiting time
-and greater serving capacity. Sofia Nguyen represents the need for repeatable
-evidence of those benefits. Reports include both latency and throughput so
-that improving one does not hide a problem with the other.
 
 \subsection{User Participation}
-Potential clients, customers and other users can review example requests,
-error messages and proposed tests. Their feedback can help the team choose
-realistic model combinations, useful performance goals and clear recovery
-instructions. A developer, operator or researcher can also review the project
-as a representative of these user groups.
+Potential application developers, operators, maintainers and researchers can
+review integration examples, recovery scenarios and benchmarks; record actual
+participants and feedback separately from the hypothetical personas.
 
-Feedback should cover the roles represented by Cursor, Together AI,
-Alex Morgan and Sofia Nguyen. For example, an application developer could
-review the integration instructions, an operator could review recovery steps,
-an engine maintainer could review compatibility checks, and a researcher could
-review the benchmark design. Actual participants and their feedback will be
-recorded separately from these representative profiles. Using a company's
-name as an example does not mean its staff have been consulted.
 
 \subsection{Maintenance Users and Service Technicians}
-Software maintainers need installation instructions, a list of supported
-versions and steps for repeating a reported problem. Server operators need
-clear error messages and instructions for returning to normal processing.
-Alex Morgan represents the engine-maintenance role, while the Together AI
-persona represents deployment operation and troubleshooting.
-The organization hosting the server remains responsible for repairing GPUs,
-maintaining the operating system and managing user access.
+Alex Morgan represents integration maintenance and Together AI represents
+operational support; both need versioned setup instructions and diagnostics,
+while the hosting organization maintains hardware, access and the operating system.
+
 
 \section{Mandated Constraints}
 
@@ -351,99 +256,57 @@ These limits keep the project manageable and allow a fair comparison with the
 serving engine running without Tandem~\hyperref[src:PS]{[PS]}.
 
 \subsection{Implementation Environment of the Current System}
-Tandem will run on a Linux server with a supported GPU and enough memory
-for the models being tested. The Development Plan proposes vLLM as the main
-serving engine, with SGLang as an alternative if needed~\hyperref[src:DP]{[DP]}.
-A serving engine is the software that loads models, schedules requests and
-produces their responses.
+Use a Linux GPU server with sufficient model memory, with vLLM as the planned
+engine and SGLang as an alternative~\hyperref[src:DP]{[DP]}; record exact model,
+tokenizer, engine and GPU-software versions before testing. CPU checks do not
+establish GPU performance, and the first model pair remains open (OI1--OI2).
 
-Before testing, the team will record the exact engine, model, tokenizer,
-GPU software and calculation settings. This list is called the
-\emph{configuration record}. Small tests may run on a CPU during development,
-but GPU tests are needed to measure serving speed. The model pair for the
-first cache-reuse test has not yet been chosen.
 
 \subsection{Partner or Collaborative Applications}
-In the planned vLLM deployment, the application sends the conversation messages
-and generation parameters, such as temperature and maximum output length.
-vLLM Semantic Router selects the target LLM and routes the inference request
-to the backend serving that model \hyperref[src:VSR]{[VSR]}.
-The target model is the router's decision, rather than a new choice made by
-Tandem.
-
-For Tandem's engine integration, the logical inputs are the routed inference
-request and, when available, a reference to the previous model's
-\emph{source KV cache}. The cache stores attention state for the conversation
-prefix it covers. Cache metadata identifies the source model, target model,
-cached prefix and token positions. The KV tensors can remain in managed
-memory and be accessed through a cache handle or transfer mechanism; they
-need not be embedded in the application's HTTP request. This distinguishes
-Tandem's internal cache interface from the normal model-serving API
+The application sends conversation messages and generation settings through
+the existing serving interface. vLLM Semantic Router chooses the target model
+\hyperref[src:VSR]{[VSR]}; the engine provides source KV state through an
+internal cache reference, rather than an application HTTP tensor payload
 \hyperref[src:VLLMAPI]{[VLLMAPI]}.
 
-Tandem's KV cache predictor takes the source model's cached keys and values
-and the supported model-pair and alignment metadata as inputs. It predicts
-a candidate target-model KV cache for that same conversation prefix. The
-prediction method and any parameter fitting are part of Tandem's development.
-Tandem validates the candidate's runtime compatibility, loads an accepted cache
-into the target model's KV memory, prefills the \emph{uncached prompt suffix},
-then continues autoregressive decoding. The suffix is every prompt token
-after the cached prefix. It includes the new user message and may include
-earlier messages or formatting tokens that the cache does not cover.
-A source model's raw KV tensors are not automatically compatible with another
-model. The predictor architecture, any training procedure, token/layer alignment
-and supported model pairs remain decisions for the proof of concept (OI1).
-Native target-model caches can be computed offline as reference data for
-development and accuracy testing. They are not computed over the shared
-prefix as a hidden prerequisite of the timed prediction path.
+Tandem predicts target KV state using source keys/values and model-pair,
+prefix and alignment metadata, checks the result, loads accepted state and
+prefills every token after the covered prefix before decoding. The complete
+logical prompt remains available for validation and fallback. Native target
+KV references are generated offline for development/evaluation, not as a hidden
+shared-prefix prefill step during serving. The application retains conversation
+storage and access control; benchmark tools replay identical routing decisions.
+The predictor method, fitting procedure and supported pair are open under OI1.
 
-The complete logical prompt, comprising conversation history and the new
-turn, remains available as text or token IDs for prefix validation and native
-prefill if reuse fails. Retaining this prompt does not mean recomputing its
-cached prefix when prediction succeeds. The predictor and cache-loading
-components can be part of the engine integration.
-Benchmark scripts replay the same requests and routing decisions with and
-without Tandem. The application manages conversation storage and user access.
 
 \subsection{Off-the-Shelf Software}
-The project plans to reuse an existing serving engine, Python, PyTorch,
-Hugging Face Transformers, model tokenizers and the GPU software described in
-the Development Plan. Their versions and licences will be recorded with each
-release. An update to one of these dependencies may require new compatibility
-tests. These libraries can support development and training of a cache
-predictor and its serving integration. Training the base LLMs is outside scope;
-predicting their KV states is the core project work.
+Reuse the serving engine, Python, PyTorch, Hugging Face Transformers,
+tokenizers and GPU libraries; record versions/licences and rerun compatibility
+tests after relevant updates. Predictor training is in scope; base-LLM training is not.
+
 
 \subsection{Anticipated Workplace Environment}
-Team members can develop on their own computers and connect to a Linux
-server for GPU work. The Development Plan describes the intended department
-GPU resources. Performance tests need a recorded hardware setup and a record
-of other work using the same GPU. Short experiments on an available GPU can
-help development, but final comparisons need repeatable conditions.
+Develop locally and use a shared Linux GPU server for model experiments,
+recording hardware and competing workloads for repeatable performance tests.
+
 
 \subsection{Schedule Constraints}
-The Development Plan lists the SRS and Hazard Analysis for October 19, 2026,
-a proof-of-concept demonstration in November, an initial demonstration in
-February, and a final demonstration in late March. Final documentation and
-EXPO work follow. The team must check current course announcements for exact
-submission dates.
+The Development Plan schedules the SRS/Hazard Analysis for October 19, 2026,
+proof of concept in November, initial demonstration in February and final
+work in March--April; confirm course dates and reconcile scope under OI5
+(see Section~\ref{sec:phases}).
 
-Section~\ref{sec:phases} describes what should be completed at each stage.
-The technical tasks in the older Development Plan need updating to match the
-current focus on switching between models.
 
 \subsection{Budget Constraints}
-The project plans to use existing university GPU resources rather than
-purchase new hardware or depend on paid model APIs. The available GPU time
-and storage allowance still need to be confirmed. If the available resources
-cannot run a planned test, the team will change or reschedule that test and
-record the reason.
+Use existing university GPU resources; available compute time and storage
+remain unconfirmed (OI7), so reschedule or reduce tests if resources are insufficient.
+
 
 \subsection{Enterprise Constraints}
-Project work is stored in the repository and reviewed through issues and
-pull requests. Shared test data must be public, synthetic or used with
-permission. Credentials and private conversations must stay out of public
-files. Each release records the code and dependency versions used.
+Review repository changes through issues and pull requests, record release
+versions, and keep credentials and private conversations out of public files;
+use only public, synthetic or permitted test data.
+
 
 \section{Naming Conventions and Terminology}
 
@@ -698,18 +561,13 @@ It states which source/target models, predictor version and settings were tested
 
 
 \subsection{Business Data Model}
-A test run has a configuration record and a list of requests with arrival
-times. Each request has a unique ID, a router-selected model, an allowed
-sharing group and possibly a source KV cache reference. A prediction attempt
-links that source cache, a versioned predictor and the selected target model
-to a predicted candidate cache. Each cache records its model, covered
-history and configuration; a prediction also records the predictor version.
+A test run links its configuration and requests; each request links its model,
+sharing group, source cache, prediction attempt, output events and measurements.
+A prediction links a versioned predictor and source/target pair to candidate
+KV state with covered-prefix metadata. Accepted requests end once as completed,
+failed or cancelled; rejections are separate. Comparisons pair corresponding
+native/Tandem requests, while applications retain conversation storage.
 
-Output events and measurements refer back to the request ID. Each accepted
-request has one final result: completed, failed or cancelled. Rejected requests
-are recorded separately. Comparisons match the same logical request across
-the normal run and the Tandem run. The application, not Tandem, stores the
-long-term conversation history.
 
 \subsection{Data Dictionary}
 The fields below describe the logical inference inputs and engine-side cache
@@ -749,21 +607,16 @@ and measurement files do not include the raw conversation or cache contents.
 
 
 \subsection{Product Boundary}
-Tandem covers text generation, exact checks for shared conversation history,
-use of tested caches, separation of requests, return to normal processing and
-repeatable evaluation on one server. The application supplies the conversation
-and generation settings; the operator configures the available models.
-vLLM Semantic Router selects the target model. The trusted engine-side cache
-component supplies source KV state; Tandem's predictor estimates candidate
-target-model caches from it.
-The baseline keeps the serving engine's existing prefix-cache features.
+Tandem includes source-to-target KV predictor development and fitting,
+reference-data preparation, engine integration, cache validation/loading,
+request isolation, fallback and evaluation on one server. The application
+supplies the prompt and settings; vLLM Semantic Router selects the target.
+Only supported predictors and exact shared prefixes are reused, and existing
+native prefix caching remains enabled in the baseline.
 
-Developing, fitting and evaluating the KV predictor is part of the product,
-along with loading its predictions into the inference engine. The project
-does not include training base LLMs, building the router, retrieving documents, coordinating agents,
-building a graphical application or running across several servers. Similar
-meaning is not enough for reuse: the covered start of the tokenized history
-must match exactly. Supported models and settings are listed explicitly.
+Base-LLM training, router development, document retrieval, agent coordination,
+a graphical application and multi-server execution are outside scope.
+
 
 \subsection{Product Use Case Table}
 \begin{longtable}{@{}p{0.12\textwidth}p{0.25\textwidth}p{0.57\textwidth}@{}}
@@ -960,23 +813,17 @@ from the source attention state is Tandem's central function.
 
 \par\medskip\noindent\textbf{Formal specification of KV prediction, cache reuse and failure behaviour.}
 \label{sec:formal}
-These rules express the preceding requirements mathematically: predict the
-target KV state from source KV state, use it only after the required checks,
-and use normal processing or report failure when prediction cannot be used.
-The letters in these equations are mathematical variables, defined alongside
-the formulas; they are different from the numbered document labels above.
-The equations make the requirements precise without prescribing internal code.
+These equations define prediction, reuse eligibility, fallback and output
+checks; their variables are defined below and do not prescribe implementation.
 
 For a source model $s$, target model $t$ and shared history $H$, define
 \[
  C_s(H)=(K_s(H),V_s(H)),\qquad
  \widehat C_t(H)=f_\theta(C_s(H),s,t,a).
 \]
-$f_\theta$ is Tandem's predictor, with versioned parameters $\theta$; $a$
-records the supported token, layer, head and cache-layout alignment. Its
-output $\widehat C_t$ contains predicted target keys and values. The base LLM
-weights remain fixed. Predictor parameters may be fitted or trained if the
-chosen method requires it; the architecture is not prescribed here.
+$f_\theta$ predicts target keys/values using versioned parameters $\theta$
+and token/layer/head/layout alignment $a$. Predictor fitting may be required;
+base LLM weights remain frozen, and architecture is open.
 
 Offline evaluation computes $C_t(H)$ through normal target prefill as the
 reference. For each declared layer or cache group, report absolute tensor
@@ -990,13 +837,6 @@ they are not required to construct predictions during a serving request.
 Tensor error is reported alongside the output checks in
 \hyperref[req:NFR-05]{\texttt{NFR-05}}. Small tensor error alone does not prove
 that generated text meets those checks.
-
-For example, on a switch from Model A to Model B, Tandem predicts Model B's
-KV cache from Model A's cache. Runtime checks establish that the prediction
-belongs to the approved predictor/Model B setup, covers the required prefix,
-has valid tensor structure and may be used by this request. They do not
-compare against a freshly computed native Model B cache. If a check fails,
-Model B processes the prompt normally.
 
 In the equations, $r$ is a request, $c$ is a possible cache, $C$ is the set
 of predicted candidate caches, and $M$ is the list of tested predictor/model-pair
@@ -1032,8 +872,7 @@ cache data that another active request still needs.
 \[
  E(c,r) \equiv V(r)\land Q(c,r)\land I(c,r)\land A(c,r)\land D(c)\land B(c,r).
 \]
-$E(c,r)$ is true only when \emph{all} of these checks pass. Let $u$ mean
-that the operator has turned cache reuse on. The initial choice is:
+All checks must pass; $u$ means prediction/reuse is enabled:
 \[
 \operatorname{path}(r)=
 \begin{cases}
@@ -1042,9 +881,8 @@ that the operator has turned cache reuse on. The initial choice is:
 \text{normal processing}, & V(r)\land(\neg u\lor\neg\exists c\in C:E(c,r)).
 \end{cases}
 \]
-In words: reject an invalid request; try reuse only when it is enabled and
-there is an acceptable cache; otherwise use normal processing. If several
-caches pass, choosing one must still satisfy every check.
+Reject invalid requests; use an eligible cache when enabled; otherwise use
+native processing. Every selected candidate must pass all checks.
 
 The cache covers $P(r)[1:n(c)]$. The model processes the remaining prompt,
 $P(r)[n(c)+1:|P(r)|]$, in order. No prompt token is skipped or logically
@@ -1088,12 +926,9 @@ mathematical proof that every possible prompt will behave identically.
 
 \par\medskip\noindent\textbf{Requirements traceability and validation.}
 \label{sec:trace}
-This table connects each requirement to its goals or supporting rules, related
-risk and planned test. G1--G4 are the project goals; C and BR refer to the
-constraints and business rules, as explained in the label key at the start
-of this section. T- labels identify proposed tests to be described in the
-Verification and Validation (V\&V) Plan; they do not mean the tests have run.
-The fit criteria above give the full test names for the functional requirements.
+The table links requirements to goals, constraints, business rules, risks
+and proposed tests. Test details belong in the Verification and Validation
+(V\&V) Plan; identifiers do not imply completed testing.
 
 The draft risk labels are H1: inaccurate or incompatible predicted KV state
 changes the response beyond the allowed limits;
@@ -1128,60 +963,41 @@ the separate Hazard Analysis.
 \bottomrule
 \end{longtable}
 
-Prediction evaluation uses paired source and native target KV caches for the
-same declared histories. If predictor parameters are learned or fitted, split
-conversations into development and held-out evaluation groups before fitting.
-Do not fit on final-test histories or tune thresholds after seeing their
-results. Report absolute and relative key/value errors by layer or cache group,
-as well as the downstream output checks. Report whether the evaluation data
-falls within the predictor's declared support limits.
+Use paired source/native-target KV references for the same histories, with
+separate fitting/development and held-out conversations. Do not fit on final
+tests or tune thresholds from their results. Report per-layer/group absolute
+and relative KV error, output checks and coverage of declared support limits.
 
-The minimum test set includes same-model turns and model switches, with and
-without shared history. It also includes usable, missing and rejected caches;
-cold and warm caches; one request at a time and simultaneous requests; and
-forced failure cases. Both sides of a comparison use the same conversations,
-model choices, response settings, arrival times and resource limits.
-Reports record which cache hits actually occurred and any work required to
-prepare the caches. A difference between the setups must be explained.
+Include same-model turns, model switches, shared/unshared history, cold/warm
+caches, accepted/missing/rejected predictions, concurrency and forced failures.
+Match prompts, routing, settings, arrivals and resource limits; record cache
+preparation and actual hits, and explain any setup differences.
 
-The starting prompt lengths and request counts are listed in
-Section~\ref{sec:constants}. Tests that exceed the model or hardware limits are
-skipped with a recorded reason. Each setup has \texttt{WARMUP\_RUNS} practice
-runs followed by \texttt{PAIRED\_RUNS} timed pairs. The order alternates so that
-one condition does not always run first. Reports include variation, failures,
-slowdowns and cases where no useful improvement is found.
-
-Completed requests per second are counted over the period from the first
-arrival to the last final status. Failed and cancelled requests stay in the
-report and are not counted as successful completions. If a request returns no
-token, TTFT is recorded as unavailable with a reason. Full request time runs
-from arrival to its final status. Counts of actual prompt work are reported
-separately from the length of the shared history. GPU memory use is reported
-when measured directly; it is not guessed from the number of avoided tokens.
+Use the settings in Section~\ref{sec:constants}, with
+\texttt{WARMUP\_RUNS} warmups and \texttt{PAIRED\_RUNS} timed pairs in
+alternating order. Record skipped/failed tests, uncertainty, slowdowns and
+negative results. Throughput counts successful completions over first arrival
+to last final status; keep failures in reports. TTFT is unavailable if no token
+is returned. Report end-to-end time, actual prompt work and directly measured
+memory separately.
 
 \section{Look and Feel Requirements}
 
 
 \subsection{Appearance Requirements}
-\textbf{Not Applicable.} Tandem is an inference-engine component with no
-graphical user interface, so it has no requirements for screen layouts,
-colours or visual branding. Readable reports and messages are covered under
-Understandability and Politeness Requirements.
+\textbf{Not Applicable.} Tandem has no graphical user interface.
 
 
 \subsection{Style Requirements}
-Messages use the same terms as the glossary and include a defined status
-or error code. Success and failure must be understandable without relying on
-colour or icons. Tandem returns the selected model's generated text without
-rewriting its style.
+Use glossary terms, defined status codes and text-readable outcomes without
+relying on colour; generated responses are not stylistically rewritten.
+
 
 \section{Usability and Humanity Requirements}
 
 
 \subsection{Ease of Use Requirements}
-Developers and operators use the existing serving API for ordinary requests.
-The instructions explain any additional setup needed to supply a cache.
-Application end users do not need a new interface or knowledge of caching.
+Ordinary requests use the existing serving interface; only technical users configure KV prediction.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-02}
 \textbf{NFR-02 --- Make setup instructions usable}\par
@@ -1190,26 +1006,19 @@ A technical user with the listed prerequisites shall be able to install Tandem a
 \textbf{Source and rationale.} Operators need a repeatable setup process.
 
 \subsection{Personalization and Internationalization Requirements}
-\textbf{Not Applicable.} The initial prototype has no personalized user
-interface or requirement to translate its administrative messages. Preserving
-Unicode prompts is still required under
-\hyperref[req:NFR-03]{\texttt{NFR-03}}; this does not require Tandem to
-translate or personalize the conversation.
+\textbf{Not Applicable.} No personalized or translated administrative interface
+is planned; Unicode preservation remains required by
+\hyperref[req:NFR-03]{\texttt{NFR-03}}.
 
 
 \subsection{Learning Requirements}
-The guide explains what cache reuse does, which setups are supported and
-what happens when reuse is unavailable. It includes a simple example that
-checks the installation and shows how to read a reuse result. Documentation is
-checked through \hyperref[req:DR-01]{\texttt{DR-01}} and
+Provide a supported installation example explaining KV prediction, fallback
+and results under \hyperref[req:DR-01]{\texttt{DR-01}} and
 \hyperref[req:NFR-02]{\texttt{NFR-02}}.
 
+
 \subsection{Understandability and Politeness Requirements}
-Messages explain the problem and what the operator can do next. If a cache
-cannot be used but the request can still run normally, the message says so.
-The documentation distinguishes a model that can load from a model/cache setup
-that has passed reuse tests. Messages identify invalid fields without repeating
-private conversation text.
+Messages identify outcomes, invalid fields and corrective actions without exposing private prompts or cache data.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-01}
 \textbf{NFR-01 --- Make results readable}\par
@@ -1219,42 +1028,29 @@ Tandem shall give human-readable results clear field names and units as well as 
 
 
 \subsection{Accessibility Requirements}
-Commands and reports use readable text and do not depend on colour.
-Machine-readable results can be displayed by other tools. There is no graphical
-interface to assess in the first version. Instructions should work without
-requiring a particular visual editor.
+Commands, reports and instructions use readable text, require no particular
+visual editor, and provide machine-readable results without colour-dependent meanings.
+
 
 \section{Performance Requirements}
 
 
 \subsection{Speed and Latency Requirements}
 \label{sec:performance}
-The main speed measure is how long the application waits for the first output
-token. Tests also measure the full request time and completed requests per
-second. The test set is chosen before the final comparison and includes cases
-where reuse should help and normal requests where it should not be needed.
+Measure TTFT, end-to-end latency and throughput on preselected workloads,
+including non-reuse cases. Timing includes queueing, source retrieval,
+prediction, checks/loading, suffix prefill and decoding; handle model loading
+consistently. Separate predictor/loading/engine timings and offline development
+costs, and retain failures and cancellations.
 
-Timing includes waiting in the queue, retrieving source KV state, executing
-the predictor, checking and loading predicted target KV state, prefilling the
-uncached suffix and generating output.
-Both sides of a comparison must handle model loading in the same way. Reports
-identify the predictor version and separate predictor latency from cache
-loading and target-engine execution. Native reference KV generation and any
-predictor training are reported as offline development costs; they do not
-replace the measured serving-path overhead. Failed and cancelled requests
-remain visible.
-
-For each paired trial, $L_B$ is the median first-token wait without Tandem and
-$L_T$ is the same measure with Tandem. $P_B,P_T$ are their p95 waiting times,
-and $Q_B,Q_T$ are completed requests per second. We compare them using
+For native baseline $B$ and Tandem $T$, $L$ is median TTFT, $P$ is p95 TTFT
+and $Q$ is successful requests per second:
 \[
  S_L=L_B/L_T,\qquad S_Q=Q_T/Q_B.
 \]
-A value above one means an improvement. Test T-STAT calculates uncertainty
-ranges by repeatedly resampling complete pairs of trials, using the
-\texttt{CONFIDENCE} and \texttt{BOOTSTRAP\_DRAWS} settings. Individual requests
-from one run are not counted as separate independent runs. This helps avoid
-calling random timing changes an improvement.
+Values above one indicate improvement. T-STAT resamples complete paired
+trials using \texttt{CONFIDENCE} and \texttt{BOOTSTRAP\_DRAWS}; requests
+within a trial are not independent repetitions.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-04}
 \textbf{NFR-04 --- Show a useful reduction in waiting time}\par
@@ -1263,30 +1059,17 @@ On at least one model-switch test chosen in advance, the tested integration shal
 \textbf{Source and rationale.} G1, G2, G4; the project must demonstrate a measured benefit rather than assume a fixed speedup.
 
 \subsection{Safety-Critical Requirements}
-\textbf{Not Applicable.} Tandem is not intended to control a safety-critical
-system. Incorrect predictions, privacy breaches, service failures and wasted
-GPU resources still require analysis in the Hazard Report and the applicable
-accuracy, robustness and security requirements.
+\textbf{Not Applicable.} Tandem does not control safety-critical equipment;
+software, privacy and resource risks remain subject to the Hazard Analysis.
 
 
 \subsection{Precision or Accuracy Requirements}
-Accuracy has two parts: how closely predicted KV tensors approximate native
-target KV tensors, and how those differences affect the selected model's
-response. \hyperref[req:FR-16]{\texttt{FR-16}} measures cache prediction error;
-the checks below compare target-model output with native prefill.
-These checks do not establish whether the base model's answer is factually true.
-
-Tests use the same prompt, model version and calculation settings. They compare
-the model's next-token scores at the same places in the same text. They also
-compare several generated tokens using greedy generation, which always picks
-the highest-scoring next token. Comparing two answers that already contain
-different earlier tokens would not be a fair score comparison.
-
-The current score tolerances and greedy-token agreement checks are conservative
-draft acceptance criteria, not a claim that predicted KV caches are exact.
-OI3 requires reviewing their feasibility for the chosen predictor on development
-data before final evaluation. A runtime metadata check cannot establish this
-accuracy on every new prompt.
+Measure KV tensor error under \hyperref[req:FR-16]{\texttt{FR-16}} and
+compare native/Tandem outputs at identical token positions with matched model
+and calculation settings. The strict draft score/greedy-token limits need
+feasibility review on development data (OI3) before final tests; runtime
+compatibility checks cannot prove prediction accuracy. Output consistency
+does not establish factual correctness.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-05}
 \textbf{NFR-05 --- Keep the selected model's output consistent}\par
@@ -1302,10 +1085,7 @@ Tandem shall preserve valid Unicode input through the selected model's normal co
 
 
 \subsection{Robustness or Fault-Tolerance Requirements}
-When an optional cache cannot be used, a valid request should still be able
-to run normally. Some problems, such as an unavailable model or an exhausted
-GPU, can prevent any response. Those problems need a clear failure status
-rather than silent loss of the request.
+A failed optional prediction uses native processing when possible; unavailable models or exhausted resources produce an explicit failure.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-06}
 \textbf{NFR-06 --- Report failures and allow later normal requests}\par
@@ -1314,10 +1094,7 @@ Tandem shall explain why an accepted request failed and keep normal processing u
 \textbf{Source and rationale.} C5, BR2; recovery depends on having a working engine and enough resources.
 
 \subsection{Capacity Requirements}
-Capacity describes how many requests can run together and how much prompt
-text and memory a tested setup can handle. These limits depend on the models
-and hardware. Tests must also check what happens when a request exceeds them.
-Serving more requests is useful only if response delays remain acceptable.
+Publish and test the supported prompt lengths, concurrency and memory limits for each model/hardware setup.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-07}
 \textbf{NFR-07 --- Handle more requests without excessive delay}\par
@@ -1334,10 +1111,7 @@ For tests that do not need Tandem's cache reuse, the integration shall stay with
 \textbf{Source and rationale.} G4, C5; the extra checks and bookkeeping must not cause excessive overhead.
 
 \subsection{Scalability or Extensibility Requirements}
-The first version supports one server and a recorded set of tested model
-combinations. More model pairs, GPU types and conversation branches can be
-added later. Coordinating several servers and guaranteeing proportional
-speedups as hardware is added are outside the initial scope.
+The initial scope is one server and tested model pairs; extra GPUs, model families, conversation branches and multi-server scaling require further qualification or expanded scope.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-09}
 \textbf{NFR-09 --- Publish supported models and limits}\par
@@ -1346,25 +1120,20 @@ Each release shall list the model/cache setups that passed testing, their simult
 \textbf{Source and rationale.} C4, BR6; users need to know what has actually been checked.
 
 \subsection{Longevity Requirements}
-The team plans to maintain the project through the final capstone release.
-Each release keeps the code version, dependency versions, test setup and results
-needed to repeat its checks. A future model or serving-engine update must be
-tested before it is listed as supported.
+Maintain the prototype through the final capstone release, retain versioned
+code/test records, and qualify model or dependency updates before claiming support.
+
 
 \section{Operational and Environmental Requirements}
 
 
 \subsection{Expected Physical Environment}
-\textbf{Not Applicable.} Tandem has no special physical-environment
-requirements, sensors or dedicated hardware enclosure. Its server, GPU and
-software requirements are covered by the implementation and test environment
-sections.
+\textbf{Not Applicable.} Tandem needs no special physical enclosure, sensors
+or environmental controls beyond the supported server.
 
 
 \subsection{Wider Environment Requirements}
-The main test environment is Linux with the selected GPU software and model
-files. Small correctness checks may also run on a development computer. Those
-small tests do not establish how fast the GPU server will run.
+GPU results require the recorded Linux/model/software setup; local CPU checks do not establish serving performance.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-10}
 \textbf{NFR-10 --- Record how to recreate the test setup}\par
@@ -1373,38 +1142,27 @@ Each tested release shall provide the software/hardware record and commands need
 \textbf{Source and rationale.} C1, BR5, BR6; the setup can affect both speed and numerical output.
 
 \subsection{Requirements for Interfacing with Adjacent Systems}
-The Data Dictionary and
-\hyperref[req:FR-01]{\texttt{FR-01}}--\hyperref[req:FR-08]{\texttt{FR-08}}
-define the logical inputs and outputs. vLLM Semantic Router supplies the
-target-model decision. The engine-side cache interface supplies the source
-KV tensors or handle and their metadata. Tandem's predictor produces the
-candidate target KV state; the loading interface receives that prediction
-after runtime checks. The uncached suffix is derived from the validated
-prefix. Supported generation
-settings are listed by version. The host
-application checks user identity and assigns sharing permissions.
+Use the existing serving interface, router-selected target model and
+engine-managed source KV reference; load validated predicted target KV through
+the engine integration. The Data Dictionary defines these fields, and the
+application assigns user identity and sharing permissions.
+
 
 \subsection{Productization Requirements}
-A developer should be able to install the prototype from the repository,
-set up the documented models and run a simple example with reuse turned off.
-Reuse can then be enabled for a setup that has passed its tests. Model files
-are obtained through permitted distribution channels. The initial deliverable
-is an installable prototype; hosting a commercial online service is outside scope.
+Deliver an installable repository prototype with permitted model sources,
+a native-processing example and prediction enabled only for qualified setups.
+
 
 \subsection{Release Requirements}
-Each release includes its code version, software requirements, supported
-model setups, known limitations and test results. Source and documents are
-available in the repository. A setup that fails a required test stays labelled
-experimental or has reuse disabled. A release cannot claim a performance goal or
-correctness requirement was met when its recorded tests show otherwise.
+Publish versioned code, dependencies, supported setups, limits and test
+results; failed or untested combinations remain experimental or disabled.
+
 
 \section{Maintainability and Support Requirements}
 
 
 \subsection{Maintenance Requirements}
-Maintainers will need to add tested model combinations and respond to
-serving-engine updates. A routine setup change should not force application
-developers to change how they submit requests.
+Support qualified model and engine updates without changing application request fields or native fallback.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-11}
 \textbf{NFR-11 --- Add a setup without changing application inputs}\par
@@ -1413,9 +1171,7 @@ For an already supported prediction method, a maintainer shall be able to add a 
 \textbf{Source and rationale.} Maintainers should not force application developers to rewrite requests for a new setup.
 
 \subsection{Supportability Requirements}
-Users report problems through repository issues. A useful report includes
-the model/software versions, error code, steps to repeat the problem and a
-non-private example. The capstone does not promise a support response time.
+Use repository issues with version details, error codes and non-private reproduction steps; no support response time is promised.
 
 \par\medskip\noindent\phantomsection\label{req:NFR-12}
 \textbf{NFR-12 --- Explain status and error codes}\par
@@ -1534,29 +1290,22 @@ Tandem shall never present output from a failed reuse attempt followed by output
 
 
 \subsection{Cultural Requirements}
-\textbf{Not Applicable.} Tandem has no culture-specific interface or
-content-customization features. It predicts KV state; it does not define the
-base model's cultural behaviour. Prediction error and effects on model output
-remain covered by the accuracy requirements.
+\textbf{Not Applicable.} Tandem adds no culture-specific interface or content features.
 
 
 \section{Compliance Requirements}
 
 
 \subsection{Legal Requirements}
-Tandem's own code uses the repository's MIT licence~\hyperref[src:DP]{[DP]}.
-Models, datasets and other libraries keep their own licence conditions. The
-team must check those conditions before using or redistributing their files.
-Shared examples must be public, synthetic or used with permission. Organizations
-that later use Tandem with real user data remain responsible for their own
-privacy and legal obligations.
+Tandem uses the repository's MIT licence~\hyperref[src:DP]{[DP]}; retain
+model/data/dependency licence conditions, required notices and permissions,
+and leave deployment-specific privacy obligations to the adopting organization.
+
 
 \subsection{Standards Compliance Requirements}
-This SRS follows the supplied Volere outline and course checklist. Supported
-interfaces and settings are listed explicitly through
-\hyperref[req:NFR-09]{\texttt{NFR-09}}. The prototype does not claim external
-safety or security certification, or complete support for every option offered
-by the underlying serving engine.
+Follow the Volere outline and course checklist; document tested interfaces
+under \hyperref[req:NFR-09]{\texttt{NFR-09}} without claiming external certification.
+
 
 \section{Open Issues}
 \label{sec:open}
@@ -1579,74 +1328,59 @@ Recording these decisions does not mean they have already been resolved.
 
 
 \subsection{Ready-Made Products}
-The serving engine already loads models, produces responses and can reuse
-some shared prompt prefixes~\hyperref[src:APC]{[APC]}. Those existing features
-are the starting point and stay enabled in the baseline. The team will first
-measure what the chosen engine version already does, then test whether Tandem
-adds a useful improvement when the selected model changes.
+Use the serving engine's existing inference and prefix-caching features as
+the baseline, then evaluate Tandem's added benefit after model switches
+\hyperref[src:APC]{[APC]}.
+
 
 \subsection{Reusable Components}
-The team can reuse existing model loaders, tokenizers, tensor operations,
-cache functions and profiling tools. Reusing a library saves implementation
-work, but the combined system still needs the required output, privacy and
-failure-handling tests.
+Reuse model loaders, tokenizers, tensor/cache operations and profiling tools,
+then validate the combined system for accuracy, privacy and failure handling.
+
 
 \subsection{Products That Can Be Copied}
-\textbf{Not Applicable.} No complete existing product has been selected for
-copying. Existing libraries and serving-engine components are covered under
-Reusable Components.
+\textbf{Not Applicable.} No complete product will be copied; reusable components are listed above.
 
 
 \section{New Problems}
 
 
 \subsection{Effects on the Current Environment}
-Cache checks, data movement and extra bookkeeping also take time and memory.
-They could make some requests slower, especially when no useful history can be
-reused. The tests therefore include normal requests as well as requests expected
-to benefit from Tandem.
+Prediction, validation, data movement and bookkeeping can add latency and
+memory use, so comparisons must include requests that do not benefit from reuse.
+
 
 \subsection{Effects on the Installed Systems}
-An engine update may break the code that loads reused caches. Each release
-must say which versions it supports and provide a way to turn reuse off.
-Tests check that the application still uses the same selected model and settings
-and that ordinary requests continue to work.
+Engine updates may break cache integration; publish supported versions,
+retain native processing and verify unchanged model selection and request settings.
+
 
 \subsection{Potential User Problems}
-Users might assume that any model the engine can load also supports cache
-reuse, or think that an unused cache means their request failed. They might
-also compare tests where only one run started with a prepared cache. Instructions
-and reports must explain these cases. A model can still give a factually wrong
-answer even when Tandem produces exactly the same answer as normal processing.
+Document unsupported model pairs, cache misses and fair baseline conditions;
+matching native model output does not establish factual correctness.
+
 
 \subsection{Limitations in the Anticipated Implementation Environment That May
 Inhibit the New Product}
-The GPU may not have enough memory to hold the selected models together.
-The engine may not provide an easy way to insert a cache or measure actual
-prompt work. Small numeric differences may make exact repeatability difficult.
-The predictor may be inaccurate on unseen conversations, and its execution
-and cache loading may take longer than native target-prefix prefill.
-Any of these problems can prevent a model setup from passing its tests or
-showing a speed benefit, and the report must say when this happens.
+Insufficient GPU memory, limited cache-insertion/profiling interfaces,
+prediction error, numerical variation or excessive predictor/loading overhead
+may prevent a setup from meeting accuracy or performance goals.
+
 
 \subsection{Follow-Up Problems}
-A new model/software version or a discovered output mismatch requires the
-affected reuse setup to be disabled and tested again. If the team cannot find
-a correct, useful cross-model method, it must review the scope with course
-staff. A tool that only measures repeated work could be a revised direction,
-but it would not automatically meet this SRS's optimization goals.
+Disable and requalify affected setups after model/engine changes or output
+mismatches; review infeasible prediction approaches with course staff rather
+than claiming the original goals were met.
+
 
 \section{Tasks}
 
 
 \subsection{Project Planning}
-The repository's issues and review process track the work. The main tasks
-are to confirm the scope, get feedback from potential users, choose a feasible
-source/target model pair, generate paired KV reference data, develop and
-evaluate the predictor, measure the unmodified engine, integrate predicted
-KV loading, and compare output accuracy and end-to-end performance.
-The plan below uses role descriptions;
-the team will decide who takes each task.
+Track scope review, model-pair selection, paired KV data, predictor development,
+engine integration and evaluation through repository issues and reviews;
+the team assigns task owners.
+
 
 \subsection{Planning of the Development Phases}
 \label{sec:phases}
@@ -1668,63 +1402,36 @@ Future work & Features in the Waiting Room section. & New scope and test decisio
 
 
 \subsection{Requirements for Migration to the New Product}
-An operator first checks that the models run normally with reuse turned off.
-They then follow the setup instructions and run the output and compatibility
-tests. Reuse is enabled only for a setup that passes. To return to the earlier
-behaviour, the operator turns reuse off or restores the recorded unmodified
-engine version. The application keeps its existing routing and conversation storage.
+Verify native processing, install Tandem and enable only qualified predictors;
+rollback by disabling prediction or restoring the recorded engine version.
+
 
 \subsection{Data That Has to be Modified or Translated for the New System}
-\textbf{Not Applicable.} Adopting Tandem does not require converting an
-existing application database or stored conversation records. Predicting
-target KV state from source KV state is runtime functionality, specified in
-\hyperref[req:FR-16]{\texttt{FR-16}}, rather than a one-time data-migration task.
-Cache invalidation after incompatible configuration changes remains covered
-by \hyperref[req:FR-13]{\texttt{FR-13}}.
+\textbf{Not Applicable.} Application data needs no migration; KV prediction
+occurs at runtime, with incompatible caches invalidated under
+\hyperref[req:FR-13]{\texttt{FR-13}}.
 
 
 \section{Costs}
-Expected costs are predictor development and any training, paired KV data
-generation and storage, GPU time, test runs and maintenance when the serving
-engine changes. The project records do not yet
-provide a confirmed money budget or measured savings. Reducing repeated
-prefill is intended to reduce serving cost, and the tests must show whether
-the saved target-prefix prefill outweighs prediction, validation and cache-loading overhead.
+Main costs are development effort, paired KV data, predictor fitting/training,
+GPU experiments, storage and maintenance; confirmed estimates remain open
+under OI7. Report offline development costs separately from serving costs.
 
-For each matching workload, report the total time for which each GPU is
-allocated to the run, including source-cache handling, predictor execution
-and predicted-cache loading. Sum that time
-across the GPUs used and divide by the number of successfully completed
-requests to obtain GPU time per completed request. Failures and their resource
-use remain in the totals; they must not make the result look cheaper.
-Also report actual prompt work, response delay and throughput so readers can
-see what changed.
+For each matched workload, include source-cache handling, prediction,
+validation/loading and failed-request resource use in total GPU time; divide
+by successful completions. If rates are known, multiply allocated GPU-hours
+by those rates, add stated charges and report cost per completion; otherwise
+report GPU time without claiming money savings. State any amortization,
+request-volume or retraining assumptions. Keep routing decisions fixed for
+Tandem comparisons and report cheaper-model selection savings separately
+with prices and task-quality checks.
 
-Report offline dataset generation, predictor fitting/training and development
-GPU costs separately. If a total deployment-cost estimate amortizes these
-costs over serving requests, state the assumed request volume and predictor
-replacement frequency. They must not be hidden in a claim about runtime savings.
-
-If GPU rental rates are supplied, estimate serving cost by multiplying each
-GPU's allocated hours by its stated hourly rate, adding any other included
-charges, and dividing by successful completions. State the rates, billing
-assumptions and which costs are included. With no price information, report
-resource savings rather than a money figure. On already-owned hardware,
-completing more requests with the same GPUs can be a capacity benefit even
-when the immediate bill stays the same.
-
-The main comparison keeps routing decisions unchanged to measure Tandem's
-contribution. Any additional comparison between a workload using one expensive
-model and a workload routed among cheaper models must be reported separately,
-with the model choices, prices and task-quality checks stated. Savings due to
-model selection must be distinguished from savings due to Tandem's prefill reuse.
 
 \section{User Documentation and Training}
 
 
 \subsection{User Documentation Requirements}
-The repository will contain instructions for installing, using, testing
-and troubleshooting Tandem.
+Provide repository instructions for installation, operation, testing and troubleshooting.
 
 \par\medskip\noindent\phantomsection\label{req:DR-01}
 \textbf{DR-01 --- Explain installation and operation}\par
@@ -1740,44 +1447,22 @@ The release shall explain how to repeat and interpret the normal-processing/Tand
 
 
 \subsection{Training Requirements}
-\textbf{Not Applicable.} No formal user-training programme is required for
-the capstone prototype. Technical setup examples and guidance for interpreting
-results belong in the user documentation under
-\hyperref[req:DR-01]{\texttt{DR-01}} and
-\hyperref[req:DR-02]{\texttt{DR-02}}.
+\textbf{Not Applicable.} Setup and troubleshooting guidance is provided in the user documentation.
 
 
 \section{Waiting Room}
-Possible later features include more conversation branches, more model
-families, more GPU configurations, measured reductions in peak memory, and
-support for another serving engine. Reusing differently worded text, running
-across several servers, building a router or providing a public application
-would require an expanded project scope. These features are not needed to
-complete the initial release.
+Future work may include more model families, conversation branches, GPUs, lower memory use and another serving engine; multi-server execution, semantic-prefix reuse, router development and a public application require new scope.
+
 
 \section{Ideas for Solution}
-The central component is a source-to-target KV cache predictor. For a
-supported model pair, it maps the source LLM's keys and values for the shared
-conversation prefix to estimated target-LLM keys and values. The mapping must
-account for the selected models' token alignment, layers, attention heads,
-tensor shapes and numeric formats. Its architecture and any training or
-fitting procedure will be chosen during the proof of concept.
+Develop a source-to-target KV predictor using paired caches from frozen
+LLMs, accounting for token/layer/head alignment and cache layout. Choose the
+architecture and any fitting method at proof of concept, keeping training
+and held-out conversations separate. Integrate prediction, runtime checks
+and loading so only the uncached suffix requires target prefill; retain
+native fallback and evaluate KV error, output effects and total serving cost.
+Tree-attention and KV-Promise features from the older plan are not required.
 
-Development can collect paired KV tensors by running both frozen base LLMs
-on the same declared histories. If the predictor is learned, these pairs
-provide training targets; separate conversations are reserved for validation
-and held-out evaluation. This offline reference generation is distinct from
-the serving path, which predicts the target state from available source KV
-without first prefilling that same prefix on the target model.
-
-An integration layer runs the predictor, validates its output and loads
-accepted predicted tensors into the target engine's KV memory. The target
-LLM then prefills only the uncached suffix and continues autoregressive
-decoding. Native processing remains available when prediction is unsupported
-or fails. Test tools compare predicted and native target KV state, downstream
-outputs, predictor overhead and end-to-end serving performance. The earlier
-tree-attention and KV-Promise ideas in the Development Plan are not required
-by this version of the SRS.
 
 \section{Appendix --- Generative AI Use Disclosure}
 
