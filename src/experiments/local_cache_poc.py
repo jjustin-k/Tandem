@@ -5,7 +5,11 @@
 #   "numpy==2.3.4", "psutil==7.1.2",
 # ]
 # ///
-"""Bounded same-model KV replay control; not a cross-model transfer result."""
+"""Same-model KV replay control. Not a cross-model transfer result.
+
+uv run --script test/experiments/test_local_cache_poc.py
+uv run --script src/experiments/local_cache_poc.py
+"""
 from __future__ import annotations
 
 import argparse
