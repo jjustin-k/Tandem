@@ -283,3 +283,8 @@ TSWLatexianTemp*
 ## Python bytecode from the build scripts
 __pycache__/
 *.pyc
+
+/venv/
+
+# Local experiment outputs (model/cache tensors must not be committed).
+/artifacts/
