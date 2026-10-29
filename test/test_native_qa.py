@@ -10,6 +10,30 @@ from src.experiments import native_qa
 
 
 class NativeQATests(unittest.TestCase):
+    def test_chat_prompt_and_question_only_control(self):
+        class Tokenizer:
+            def __call__(self, text, **kwargs):
+                return {'input_ids': [9] if text == ' ' else [1, 2]}
+
+            def apply_chat_template(self, messages, **kwargs):
+                self.messages = messages
+                self.options = kwargs
+                return [3, 4, 5]
+        text = 'Passage: secret context\nQuestion: Which city?\nAnswer:'
+        sample = {'id': 'one', 'text': text, 'question_span': [text.index('Which'), text.index('?') + 1],
+                  'tokens': {'qwen': {'ids': [1, 2]}}}
+        tok = Tokenizer()
+        self.assertEqual(native_qa.input_ids(tok, sample, 'qwen', 'saved-prefix'), [1, 2, 9])
+        self.assertEqual(sample['tokens']['qwen']['ids'], [1, 2])
+        self.assertEqual(native_qa.input_ids(tok, sample, 'qwen', 'chat'), [3, 4, 5])
+        self.assertIn('secret context', tok.messages[1]['content'])
+        self.assertFalse(tok.messages[1]['content'].endswith('Answer:'))
+        self.assertTrue(tok.options['add_generation_prompt'])
+        native_qa.input_ids(tok, sample, 'qwen', 'chat', no_context=True)
+        self.assertEqual(tok.messages[1]['content'], 'Which city?')
+        with self.assertRaises(ValueError):
+            native_qa.input_ids(tok, sample, 'qwen', 'saved-prefix', no_context=True)
+
     def test_hotpot_scoring(self):
         self.assertEqual(native_qa.score('The Eiffel Tower!', 'eiffel tower'), (1.0, 1.0))
         self.assertAlmostEqual(native_qa.score('red blue', 'red green')[1], 0.5)

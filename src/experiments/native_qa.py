@@ -2,13 +2,17 @@
 # requires-python = ">=3.12,<3.13"
 # dependencies = ["torch==2.9.1", "transformers==4.57.1", "huggingface-hub==0.36.0", "certifi==2025.10.5"]
 # ///
-"""Native QA control on the paired HotpotQA validation prompts.
+"""Native QA diagnostics on the paired HotpotQA prompts.
 
 uv run --script src/experiments/native_qa.py --device cuda --output artifacts/native-qa.json
 
 Downloads the pinned models and the prompt manifest/labels. Output contains
 answers and predictions; keep it out of Git. GPU use is restricted by setting
 CUDA_VISIBLE_DEVICES before running this script on a shared server.
+
+Chat mode tests the models' intended prompting format. Its token prefix differs
+from the saved dataset: these scores cannot serve as a saved-cache transfer
+baseline. Use saved-prefix mode to reproduce the cache-compatible control.
 """
 import argparse
 import collections
@@ -31,6 +35,8 @@ PREFIX = 'runs/hotpot-200-20261028'
 MANIFEST_SHA256 = 'b88a13e01fd31f9fe56e2dd05b10e6703279080d3669f033c131ecfcdb0b9532'
 LABELS_SHA256 = '99fbad2b671a5df2598e0e612fc9de709c9daac7492b246943b274096111e5eb'
 ANSWER_CUE = ' '
+QA_INSTRUCTION = ('Answer the question. Use the passages when provided. '
+                  'Reply with only the short answer, or yes or no for a yes/no question. Do not explain.')
 MODELS = {
     'qwen': {'id': 'Qwen/Qwen2.5-0.5B-Instruct', 'revision': '7ae557604adf67be50417f59c2c2f167def9a775', 'type': 'qwen2'},
     'smol': {'id': 'HuggingFaceTB/SmolLM2-360M-Instruct', 'revision': 'a10cc1512eabd3dde888204e902eca88bddb4951', 'type': 'llama'},
@@ -56,6 +62,22 @@ def score(prediction, answer):
         return exact, 0.0
     precision, recall = overlap / len(p), overlap / len(g)
     return exact, 2 * precision * recall / (precision + recall)
+
+
+def input_ids(tokenizer, sample, alias, prompt_format, no_context=False):
+    saved = tokenizer(sample['text'], add_special_tokens=False)['input_ids']
+    if saved != sample['tokens'][alias]['ids']:
+        raise ValueError(f'Tokenizer mismatch: {sample["id"]}')
+    if prompt_format == 'saved-prefix':
+        if no_context:
+            raise ValueError('No-context control requires chat formatting')
+        return saved + tokenizer(ANSWER_CUE, add_special_tokens=False)['input_ids']
+    if not sample['text'].endswith('\nAnswer:'):
+        raise ValueError('Unexpected prompt suffix')
+    start, end = sample['question_span']
+    content = sample['text'][start:end] if no_context else sample['text'].removesuffix('\nAnswer:')
+    messages = [{'role': 'system', 'content': QA_INSTRUCTION}, {'role': 'user', 'content': content}]
+    return tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
 
 
 def load_inputs(manifest_path, labels_path):
@@ -86,7 +108,10 @@ def main():
     parser.add_argument('--device', choices=('cpu', 'mps', 'cuda'), default='cuda')
     parser.add_argument('--models', nargs='+', choices=MODELS, default=list(MODELS))
     parser.add_argument('--max-new-tokens', type=int, default=32)
-    parser.add_argument('--limit', type=int, help='Limit validation prompts for a smoke test')
+    parser.add_argument('--limit', type=int, help='Limit prompts for a smoke test')
+    parser.add_argument('--split', choices=('train', 'validation'), default='validation')
+    parser.add_argument('--prompt-format', choices=('chat', 'saved-prefix'), default='chat')
+    parser.add_argument('--no-context', action='store_true', help='Chat question-only control')
     args = parser.parse_args()
     if args.output.exists():
         parser.error('Output already exists; choose a new path')
@@ -94,53 +119,60 @@ def main():
         parser.error('Token and sample limits must be positive')
     if len(set(args.models)) != len(args.models):
         parser.error('Do not repeat a model')
+    if args.no_context and args.prompt_format != 'chat':
+        parser.error('--no-context requires --prompt-format chat')
     if args.device == 'cuda' and (not os.environ.get('CUDA_VISIBLE_DEVICES') or not torch.cuda.is_available() or torch.cuda.device_count() != 1):
         parser.error('Set CUDA_VISIBLE_DEVICES to one allocated GPU')
     torch.set_num_threads(4)
+    if args.prompt_format == 'chat':
+        print('Chat diagnostic: these inputs differ from the saved-cache prefixes.', flush=True)
     def fetch(name):
         return Path(hf_hub_download(REPO, f'{PREFIX}/{name}', repo_type='dataset', revision=REVISION))
     samples, answers = load_inputs(fetch('manifest.json'), fetch('labels.json'))
-    selected = [sample for sample in samples if sample['split'] == 'validation']
-    if len(selected) != 40:
-        raise ValueError('Expected 40 validation prompts')
+    selected = [sample for sample in samples if sample['split'] == args.split]
+    if len(selected) != {'train': 160, 'validation': 40}[args.split]:
+        raise ValueError('Unexpected split size')
     if args.limit:
         selected = selected[:args.limit]
     result = {'dataset': REPO, 'dataset_revision': REVISION, 'manifest_sha256': MANIFEST_SHA256,
-              'labels_sha256': LABELS_SHA256, 'split': 'validation', 'prompt_count': len(selected),
+              'labels_sha256': LABELS_SHA256, 'split': args.split, 'prompt_count': len(selected),
               'device': args.device, 'torch': torch.__version__, 'max_new_tokens': args.max_new_tokens,
-              'decoding': 'greedy', 'answer_cue': ANSWER_CUE,
+              'decoding': 'greedy', 'prompt_format': args.prompt_format, 'no_context': args.no_context,
+              'saved_cache_compatible': args.prompt_format == 'saved-prefix',
+              'answer_cue': ANSWER_CUE if args.prompt_format == 'saved-prefix' else None,
+              'instruction': QA_INSTRUCTION if args.prompt_format == 'chat' else None,
               'answer_extraction': 'first generated line', 'models': {}}
     for alias in args.models:
         spec = MODELS[alias]
         tokenizer = AutoTokenizer.from_pretrained(spec['id'], revision=spec['revision'])
-        # Tokenize the cue separately: the saved prompt token IDs must remain an
-        # exact prefix for comparison with replayed or translated caches.
-        cue_ids = tokenizer(ANSWER_CUE, add_special_tokens=False)['input_ids']
-        if not cue_ids:
-            raise ValueError('Answer cue did not produce any tokens')
+        cue_ids = tokenizer(ANSWER_CUE, add_special_tokens=False)['input_ids'] if args.prompt_format == 'saved-prefix' else []
         model = AutoModelForCausalLM.from_pretrained(spec['id'], revision=spec['revision'], dtype=torch.float32, attn_implementation='eager').eval().to(args.device)
         rows = []
         for sample in selected:
-            token_ids = tokenizer(sample['text'], add_special_tokens=False)['input_ids']
-            if token_ids != sample['tokens'][alias]['ids']:
-                raise ValueError(f'Tokenizer mismatch: {sample["id"]}')
-            tokens = torch.tensor([token_ids + cue_ids], device=args.device)
+            token_ids = input_ids(tokenizer, sample, alias, args.prompt_format, args.no_context)
+            tokens = torch.tensor([token_ids], device=args.device)
             with torch.inference_mode():
                 generated = model.generate(input_ids=tokens, attention_mask=torch.ones_like(tokens),
                     max_new_tokens=args.max_new_tokens, do_sample=False, num_beams=1, use_cache=True,
                     pad_token_id=tokenizer.eos_token_id)
-            continuation = generated[0, len(token_ids) + len(cue_ids):]
+            continuation = generated[0, len(token_ids):]
             decoded = tokenizer.decode(continuation, skip_special_tokens=True).strip()
             prediction = decoded.split('\n', 1)[0].strip()
             answer = answers[sample['id']]['answer']
             exact, f1 = score(prediction, answer)
             rows.append({'id': sample['id'], 'answer': answer, 'prediction': prediction, 'generated_text': decoded,
-                         'generated_tokens': len(continuation), 'reached_token_limit': len(continuation) == args.max_new_tokens,
+                         'generated_tokens': len(continuation), 'generated_token_ids': continuation.tolist(),
+                         'reached_token_limit': len(continuation) == args.max_new_tokens,
                          'exact_match': exact, 'f1': f1})
             print(f'{alias} {len(rows)}/{len(selected)}: {sample["id"]} EM={exact:.0f} F1={f1:.3f}', flush=True)
         result['models'][alias] = {'model': spec, 'cue_token_ids': cue_ids,
                                    'exact_match': sum(r['exact_match'] for r in rows) / len(rows),
                                    'f1': sum(r['f1'] for r in rows) / len(rows), 'samples': rows}
+        metrics = result['models'][alias]
+        metrics['empty_answers'] = sum(not r['prediction'] for r in rows)
+        metrics['token_limit_reached'] = sum(r['reached_token_limit'] for r in rows)
+        print(f"{alias} summary: EM={metrics['exact_match']:.1%}, F1={metrics['f1']:.1%}, "
+              f"empty={metrics['empty_answers']}/{len(rows)}, limit={metrics['token_limit_reached']}/{len(rows)}", flush=True)
         del model, tokenizer
         if args.device == 'cuda':
             torch.cuda.empty_cache()
