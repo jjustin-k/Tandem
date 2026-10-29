@@ -36,7 +36,7 @@ def analyze(prompt: str) -> dict:
     return _classifier()(prompt)
 
 
-def route(prompt: str, mode: str = "task", *, threshold: float = 0.5) -> str:
+def route(prompt: str, mode: str = "task", *, threshold: float = 0.5, task_models=None) -> str:
     """Return 'qwen' or 'smollm'; never load or call either target model.
 
     task: map NVIDIA's predicted task label through TASK_MODELS.
@@ -52,7 +52,11 @@ def route(prompt: str, mode: str = "task", *, threshold: float = 0.5) -> str:
         raise ValueError("threshold must be a finite number between 0 and 1.2")
     result = analyze(prompt)
     if mode == "task":
-        return TASK_MODELS[result["task"]]
+        if task_models is None:
+            return TASK_MODELS[result["task"]]
+
+        # TODO add exception handling
+        return task_models[result["task"]]
     return "qwen" if result["complexity"] >= threshold else "smollm"
 
 
