@@ -182,49 +182,6 @@ def prepare(args):
     print(f"Prepared {len(samples)} prompts ({len(samples) - validation} train / {validation} validation)", flush=True)
 
 
-def make_labels(args):
-    """Join pinned source answers to an existing manifest, checking each prompt."""
-    import pyarrow.parquet as pq
-    manifest_path = args.output / "manifest.json"
-    target = args.output / "labels.json"
-    if target.exists():
-        raise ValueError("labels.json already exists")
-    if not args.dataset_repo or not args.dataset_revision:
-        raise ValueError("Provide --dataset-repo and immutable --dataset-revision")
-    manifest = json.loads(manifest_path.read_text())
-    validate_manifest(manifest)
-    wanted = {s["id"]: s for s in manifest["samples"]}
-    source = hf_hub_download(SOURCE["id"], SOURCE["file"], revision=SOURCE["revision"], repo_type="dataset")
-    found = {}
-    index = 0
-    for batch in pq.ParquetFile(source).iter_batches(batch_size=256, columns=["id", "question", "context", "answer"]):
-        for row in batch.to_pylist():
-            sample = wanted.get(str(row["id"]))
-            if sample is not None:
-                if row["id"] in found or index != sample["source_row"]:
-                    raise ValueError("Duplicate ID or source row mismatch")
-                text, span = format_prompt(row)
-                if text != sample["text"] or span != sample["question_span"]:
-                    raise ValueError("Source prompt mismatch")
-                answer = row["answer"]
-                if not isinstance(answer, str) or not answer.strip():
-                    raise ValueError("Missing source answer")
-                found[row["id"]] = {"id": row["id"], "split": sample["split"],
-                                    "answer": answer, "source_row": index}
-            index += 1
-        if index >= manifest["scan_rows"]:
-            break
-    if set(found) != set(wanted):
-        raise ValueError("Source answers do not cover the manifest")
-    if not args.manifest_path:
-        raise ValueError("Provide the dataset-relative --manifest-path")
-    labels = {"schema": 1, "dataset_repo": args.dataset_repo, "dataset_revision": args.dataset_revision,
-              "manifest_path": args.manifest_path, "manifest_sha256": file_sha(manifest_path),
-              "source": SOURCE, "labels": [found[s["id"]] for s in manifest["samples"]]}
-    write_json(target, labels)
-    print(f"Prepared {len(found)} checked labels at {target}", flush=True)
-
-
 def validate_manifest(manifest):
     if manifest["schema"] != 1 or manifest["source"] != SOURCE:
         raise ValueError("Manifest source/schema mismatch")
@@ -414,7 +371,7 @@ def verify(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=["prepare", "extract", "verify", "labels"])
+    parser.add_argument("operation", choices=["prepare", "extract", "verify"])
     parser.add_argument("--output", type=Path, default=Path("artifacts/paired-kv-pilot"))
     parser.add_argument("--count", type=int, default=10)
     parser.add_argument("--scan-rows", type=int, default=4096)
@@ -422,8 +379,5 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=20261028)
     parser.add_argument("--device", choices=["auto", "cpu", "mps", "cuda"], default="auto")
     parser.add_argument("--models", nargs="+", choices=list(MODELS), default=list(MODELS))
-    parser.add_argument("--dataset-repo", help="Hugging Face dataset ID for label provenance")
-    parser.add_argument("--dataset-revision", help="Immutable dataset revision containing the manifest")
-    parser.add_argument("--manifest-path", help="Dataset-relative manifest path for label provenance")
     args = parser.parse_args()
-    {"prepare": prepare, "extract": extract, "verify": verify, "labels": make_labels}[args.operation](args)
+    {"prepare": prepare, "extract": extract, "verify": verify}[args.operation](args)
