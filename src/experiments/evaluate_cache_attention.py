@@ -74,6 +74,26 @@ def timed(fn, device, repeats):
     return times
 
 
+def lock_workdir(work):
+    import fcntl
+    lock = (work / 'evaluation.lock').open('w')
+    try:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock.close()
+        raise RuntimeError(f'Another evaluation is using {work}') from None
+    return lock
+
+
+def check_destination(api, prefix):
+    current = api.dataset_info(REPO, files_metadata=True)
+    if not current.private:
+        raise ValueError('Evaluation destination is not private')
+    if any(s.rfilename.startswith(prefix + '/') for s in current.siblings):
+        raise ValueError('Evaluation upload prefix already exists')
+    return current
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--work', required=True, type=Path)
@@ -91,11 +111,14 @@ def main():
     if args.upload_prefix and (not args.upload_prefix.startswith('experiments/') or '..' in args.upload_prefix):
         p.error('Use an experiments/... upload prefix')
     args.work.mkdir(parents=True, exist_ok=True)
+    lock = lock_workdir(args.work)
     output_path = args.work / 'evaluation.json'
     if output_path.exists():
         p.error('Output exists; use a new work directory')
     torch.set_num_threads(4)
     api = HfApi()
+    if args.upload_prefix:
+        check_destination(api, args.upload_prefix)
     info = api.dataset_info(REPO, revision=CHECKPOINT_REVISION, files_metadata=True)
     if not info.private:
         raise ValueError('Expected private checkpoint repository')
@@ -174,9 +197,7 @@ def main():
             'immediate_eos': sum(r['methods'][name]['tokens'][0] in eos_ids for r in rows)}
     base.write_json(output_path, report)
     if args.upload_prefix:
-        current = api.dataset_info(REPO, files_metadata=True)
-        if not current.private or any(s.rfilename.startswith(args.upload_prefix + '/') for s in current.siblings):
-            raise ValueError('Dataset is public or output prefix already exists')
+        current = check_destination(api, args.upload_prefix)
         commit = api.upload_file(repo_id=REPO, repo_type='dataset', path_or_fileobj=str(output_path),
                                  path_in_repo=f'{args.upload_prefix}/evaluation.json', parent_commit=current.sha,
                                  commit_message='Add free-running cache mapper evaluation')
@@ -189,6 +210,7 @@ def main():
             raise ValueError('Evaluation upload verification failed; local report retained')
         print(f'Uploaded and verified evaluation: {commit.oid}', flush=True)
     print('COMPLETE: ' + json.dumps(report['summary']), flush=True)
+    lock.close()
 
 
 if __name__ == '__main__':

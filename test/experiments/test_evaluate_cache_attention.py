@@ -1,17 +1,33 @@
 """Check free-running evaluation and repeated timing controls offline."""
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src/experiments'))
 import torch
 from transformers import Qwen2Config, Qwen2ForCausalLM
 import paired_kv_dataset as base
 from train_cache_attention import stack_features
-from evaluate_cache_attention import native_start, cached_start, continue_greedy, prefix_agreement, timed
+from evaluate_cache_attention import native_start, cached_start, continue_greedy, prefix_agreement, timed, lock_workdir, check_destination
 
 
 class EvaluationTests(unittest.TestCase):
+    def test_duplicate_runs_and_existing_destinations_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first = lock_workdir(Path(tmp))
+            with self.assertRaisesRegex(RuntimeError, 'Another evaluation'):
+                lock_workdir(Path(tmp))
+            first.close()
+            lock_workdir(Path(tmp)).close()
+        class Api:
+            def dataset_info(self, *args, **kwargs):
+                return SimpleNamespace(private=True, siblings=[SimpleNamespace(rfilename='experiments/existing/evaluation.json')])
+        with self.assertRaisesRegex(ValueError, 'already exists'):
+            check_destination(Api(), 'experiments/existing')
+        self.assertTrue(check_destination(Api(), 'experiments/new').private)
+
     def test_prefix_agreement_counts_first_divergence_and_eos(self):
         self.assertEqual(prefix_agreement([1, 2, 3], [1, 4, 3]),
                          {'first_token_match': True, 'matching_prefix_tokens': 1, 'sequence_equal': False})
