@@ -4,17 +4,56 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from requests import Response
+from requests.exceptions import HTTPError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src/experiments'))
 import torch
 from transformers import Qwen2Config, Qwen2ForCausalLM
 import paired_kv_dataset as base
 from train_cache_attention import stack_features, receiver_logits, logit_kl
-from calibrate_cache_attention import (continuation_inputs, teacher_logits, stopping_update,
+from calibrate_cache_attention import (CheckpointPublisher, continuation_inputs, teacher_logits, stopping_update,
                                        save_progress, restore_progress)
 
 
 class ContinuationTests(unittest.TestCase):
+    def test_publication_throttles_commits_and_preserves_rate_limit_across_resume(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(work=Path(tmp))
+            calls, clock = [], [0.]
+            publisher = CheckpointPublisher(args, upload=lambda _: calls.append(1), clock=lambda: clock[0])
+            self.assertTrue(publisher())
+            clock[0] = 10.
+            self.assertFalse(publisher())
+            self.assertEqual(len(calls), 1)
+            self.assertTrue(publisher(final=True))
+            response = Response()
+            response.status_code = 429
+            response.headers['Retry-After'] = '7200'
+            def rate_limit(_):
+                raise HTTPError('rate limited', response=response)
+            publisher.upload = rate_limit
+            clock[0] = 700.
+            self.assertFalse(publisher())
+            self.assertTrue(publisher.pending.exists())
+            resumed = CheckpointPublisher(args, upload=lambda _: calls.append(1), clock=lambda: clock[0])
+            self.assertFalse(resumed(final=True))
+            self.assertEqual(len(calls), 2)
+            clock[0] = 7901.
+            self.assertTrue(resumed(final=True))
+            self.assertFalse(resumed.pending.exists())
+
+    def test_publication_does_not_hide_authentication_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            response = Response()
+            response.status_code = 401
+            def fail(_):
+                raise HTTPError('unauthorized', response=response)
+            publisher = CheckpointPublisher(SimpleNamespace(work=Path(tmp)), upload=fail)
+            with self.assertRaises(HTTPError):
+                publisher()
+
     def test_stopping_requires_five_unimproved_passes_and_resets_on_improvement(self):
         best, stale = 2., 0
         for _ in range(4):

@@ -22,11 +22,20 @@ export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
 cd "$(dirname "$0")"
 sha256sum -c SHA256SUMS
 for tokens in 1 32; do
+  work="$run_home/full-tokens-$tokens"
+  if [ -f "$work/outputs/comparison.json" ] && python3 - "$work/outputs/comparison.json" <<'PY'
+import json, sys
+report = json.load(open(sys.argv[1]))
+sys.exit(0 if report.get('early_stopped') or report.get('complete_epochs', 0) >= 30 else 1)
+PY
+  then
+    echo "Token count $tokens: already completed or early-stopped; skipping."
+    continue
+  fi
   test "$(nvidia-smi -i 0 --query-gpu=memory.used --format=csv,noheader,nounits)" -lt 512 || {
     echo "GPU 0 is occupied. Stopping."
     exit 1
   }
-  work="$run_home/full-tokens-$tokens"
   resume=()
   if [ -d "$work/outputs" ]; then
     resume=(--resume)

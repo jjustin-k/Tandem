@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+from requests.exceptions import RequestException
 import torch
 from torch.nn import functional as F
 from huggingface_hub import HfApi, hf_hub_download
@@ -84,6 +85,48 @@ def save_progress(out, mapper, optimizer, run, provenance, state):
     checkpoint(out / 'last.pt', payload)
 
 
+class CheckpointPublisher:
+    """Keep local training independent of transient Hub upload failures."""
+    def __init__(self, args, upload=upload_outputs, clock=time.time, interval=600):
+        self.args, self.upload, self.clock, self.interval = args, upload, clock, interval
+        self.pending = args.work / 'upload-pending.json'
+        self.next_upload, self.blocked_until = 0., 0.
+        if self.pending.exists():
+            self.blocked_until = json.loads(self.pending.read_text())['retry_after_unix']
+
+    def __call__(self, final=False):
+        now = self.clock()
+        if now < self.blocked_until or (not final and now < self.next_upload):
+            return False
+        try:
+            self.upload(self.args)
+        except RequestException as error:
+            response = getattr(error, 'response', None)
+            status = response.status_code if response is not None else None
+            if status is not None and status not in (408, 429, 500, 502, 503, 504):
+                raise
+            delay = 3600 if status == 429 else self.interval
+            if response is not None:
+                retry = response.headers.get('Retry-After', '')
+                try:
+                    delay = max(delay, float(retry))
+                except ValueError:
+                    from email.utils import parsedate_to_datetime
+                    try:
+                        delay = max(delay, parsedate_to_datetime(retry).timestamp() - now)
+                    except (TypeError, ValueError, OverflowError):
+                        pass
+            self.blocked_until = now + delay
+            base.write_json(self.pending, {'retry_after_unix': self.blocked_until,
+                            'status': status, 'outputs': str(self.args.work / 'outputs')})
+            print(f'UPLOAD DEFERRED: HTTP {status}; local checkpoints retained; retry in {delay:.0f}s. Training continues.', flush=True)
+            return False
+        self.next_upload = now + self.interval
+        self.blocked_until = 0.
+        self.pending.unlink(missing_ok=True)
+        return True
+
+
 def score(mapper, receiver, data, samples, traces, args, greedy=False):
     mapper.eval()
     rows = []
@@ -149,12 +192,17 @@ def main():
                               ('last.pt', 'best.pt', 'run.json', 'before.json', 'train-before.json', 'native-traces.json')):
         p.error('Resume requires an existing calibration checkpoint and baseline outputs')
     api = HfApi()
+    publish = CheckpointPublisher(args)
     if args.resume:
         if not api.dataset_info(REPO).private:
             p.error('Resume destination must be private')
-        receipt = json.loads((args.work / 'upload-receipt.json').read_text())
-        if receipt['prefix'] != args.upload_prefix:
-            p.error('Resume must use the original upload prefix')
+        receipt_path = args.work / 'upload-receipt.json'
+        if receipt_path.exists():
+            receipt = json.loads(receipt_path.read_text())
+            if receipt['prefix'] != args.upload_prefix:
+                p.error('Resume must use the original upload prefix')
+        else:
+            check_destination(api, args.upload_prefix)  # Initial commit may have failed before any receipt.
     else:
         check_destination(api, args.upload_prefix)
     info = api.dataset_info(REPO, revision=CHECKPOINT_REVISION, files_metadata=True)
@@ -239,7 +287,7 @@ def main():
                  'stale': 0, 'epoch_loss_sum': 0., 'epoch_loss_count': 0}
         save_progress(out, mapper, optimizer, run, provenance, state)
     print('BEFORE: '+json.dumps(before['summary']), flush=True)
-    upload_outputs(args)
+    publish()
     stopped = False
     for epoch in range(state['epoch'], args.epochs):
         if state['stale'] >= args.patience:
@@ -277,10 +325,10 @@ def main():
                 print(f"Epoch {epoch+1}/{args.epochs}, prompt {position+1}/{len(train)}: {loss.item():.5f}", flush=True)
             if state['steps'] % 25 == 0:
                 save_progress(out, mapper, optimizer, run, provenance, state)
-                upload_outputs(args)
+                publish()
         if stopped:
             save_progress(out, mapper, optimizer, run, provenance, state)
-            upload_outputs(args)
+            publish()
             break
         validation_score = score(mapper, receiver, data, validation, traces, args)
         state['best'], state['stale'], improved = stopping_update(validation_score['summary']['kl'], state['best'], state['stale'])
@@ -295,7 +343,7 @@ def main():
         print(json.dumps(row), flush=True)
         state.update(epoch=epoch+1, position=0, epoch_loss_sum=0., epoch_loss_count=0)
         save_progress(out, mapper, optimizer, run, provenance, state)
-        upload_outputs(args)
+        publish()
     mapper.load_state_dict(torch.load(out / 'best.pt', map_location=args.device, weights_only=True)['model'])
     after = score(mapper, receiver, data, validation, traces, args, greedy=True)
     train_after = score(mapper, receiver, data, train[:8], traces, args, greedy=True)
@@ -306,7 +354,9 @@ def main():
               'wall_seconds': time.perf_counter()-started,
               'peak_cuda_allocated_bytes': torch.cuda.max_memory_allocated()}
     base.write_json(out / 'comparison.json', result)
-    upload_outputs(args)
+    uploaded = publish(final=True)
+    if not uploaded:
+        print(f'UPLOAD PENDING: completed outputs are saved at {out}', flush=True)
     print('COMPLETE: '+json.dumps({'before': before['summary'], 'after': after['summary']}), flush=True)
     lock.close()
 
