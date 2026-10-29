@@ -56,3 +56,15 @@ The training stride is eight receiver tokens and batches contain 16 aligned posi
 `behavior-mse.json` compares both methods after reconstruction training. `final.json` compares the affine control with the selected attention checkpoint after calibration. Reports include teacher-forced suffix logit KL, top-1 agreement, the native replay control's maximum logit error, and peak PyTorch GPU allocation.
 
 Timing is exploratory, single-GPU wall time with CUDA synchronization. Mapping measurements include CPU-source-feature copies, alignment, mapping, RoPE/cache construction and receiver suffix processing. Native timing includes receiver prefill and the same suffix. Source prefill, file I/O and tokenization are excluded. Single measurements are not sufficient to claim a production speedup; use matched warm-ups and repeated measurements before any latency claim. No full-text answer accuracy, free-running generation retention, multi-turn stability or universal-translation result is established by this experiment.
+
+## Free-running evaluation
+
+`evaluate_cache_attention.py` loads the pinned behavior-selected checkpoint and the same validation prompts. It compares up to 32 independently generated greedy tokens for native prefill, affine transfer and attention transfer, recording first-token agreement, matching prefix length and exact sequence agreement. It checks native saved-cache logits and continuations against native prefill for every prompt. Outputs include generated text but no answer labels.
+
+It also reports five synchronized timings per prompt after a warm-up for each path. Native prefill and mapped handoff run on one GPU; mapping includes CPU-to-GPU source-cache copies, alignment, RoPE/cache construction and first-token computation, but excludes source prefill, disk I/O and tokenization. These are not GPU-to-GPU or cold-start measurements. Validation was used for checkpoint selection; this is development evaluation, not a final held-out test.
+
+```sh
+uv run --locked --script src/experiments/evaluate_cache_attention.py \
+  --work /path/to/evaluation --data-root /path/to/shared-feature-cache \
+  --device cuda --upload-prefix experiments/your-unique-evaluation
+```

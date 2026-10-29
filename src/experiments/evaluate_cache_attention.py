@@ -1,0 +1,195 @@
+# /// script
+# requires-python = ">=3.12,<3.13"
+# dependencies = ["torch==2.9.1", "transformers==4.57.1", "safetensors==0.6.2", "huggingface-hub==0.36.0", "pyarrow==21.0.0", "certifi==2025.10.5"]
+# ///
+"""Free-running and warm-timing evaluation of the existing mapper checkpoint."""
+import argparse
+import json
+import os
+import statistics
+import time
+from pathlib import Path
+from types import SimpleNamespace
+
+os.environ.setdefault('HF_HUB_DISABLE_PROGRESS_BARS', '1')
+import torch
+from huggingface_hub import HfApi, hf_hub_download
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import paired_kv_dataset as base
+from cache_attention import CacheAttention
+from train_cache_attention import Dataset, REPO, synchronize, to_cache, translate_prefix
+
+CHECKPOINT_REVISION = '3718426b6bd55c354d49912d342958305ac5fe10'
+CHECKPOINT = 'experiments/attention-20261028-221854/full/behavior-best.pt'
+
+
+def native_start(receiver, tokens):
+    return receiver(input_ids=tokens, use_cache=True, logits_to_keep=1)
+
+
+def cached_start(receiver, features, token):
+    cache = to_cache(features, receiver)
+    position = torch.tensor([len(features)], device=token.device)
+    return receiver(input_ids=token, past_key_values=cache, use_cache=True,
+                    attention_mask=torch.ones(1, len(features) + 1, dtype=torch.long, device=token.device),
+                    position_ids=position[None], cache_position=position, logits_to_keep=1)
+
+
+def continue_greedy(receiver, output, max_new_tokens, eos_ids):
+    cache, logits = output.past_key_values, output.logits[:, -1, :]
+    tokens = []
+    for i in range(max_new_tokens):
+        token = logits.argmax(-1).item()
+        tokens.append(token)
+        if token in eos_ids or i == max_new_tokens - 1:
+            break
+        position = torch.tensor([cache.get_seq_length()], device=logits.device)
+        output = receiver(input_ids=torch.tensor([[token]], device=logits.device), past_key_values=cache,
+                          attention_mask=torch.ones(1, position.item() + 1, dtype=torch.long, device=logits.device),
+                          position_ids=position[None], cache_position=position, use_cache=True, logits_to_keep=1)
+        cache, logits = output.past_key_values, output.logits[:, -1, :]
+    return tokens
+
+
+def prefix_agreement(native, candidate):
+    same = 0
+    for a, b in zip(native, candidate):
+        if a != b:
+            break
+        same += 1
+    return {'first_token_match': bool(native and candidate and native[0] == candidate[0]),
+            'matching_prefix_tokens': same, 'sequence_equal': native == candidate}
+
+
+def timed(fn, device, repeats):
+    fn()  # Separate warm-up for each path.
+    synchronize(device)
+    times = []
+    for _ in range(repeats):
+        synchronize(device)
+        start = time.perf_counter()
+        fn()
+        synchronize(device)
+        times.append((time.perf_counter() - start) * 1000)
+    return times
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--work', required=True, type=Path)
+    p.add_argument('--data-root', required=True, type=Path)
+    p.add_argument('--device', choices=('cpu', 'cuda'), default='cuda')
+    p.add_argument('--limit', type=int, default=40)
+    p.add_argument('--tokens', type=int, default=32)
+    p.add_argument('--repeats', type=int, default=5)
+    p.add_argument('--upload-prefix', help='Unique experiments/... destination')
+    args = p.parse_args()
+    if min(args.limit, args.tokens, args.repeats) < 1 or args.limit > 40:
+        p.error('Invalid evaluation limits')
+    if args.device == 'cuda' and (not os.environ.get('CUDA_VISIBLE_DEVICES') or not torch.cuda.is_available() or torch.cuda.device_count() != 1):
+        p.error('Set CUDA_VISIBLE_DEVICES to one allocated GPU')
+    if args.upload_prefix and (not args.upload_prefix.startswith('experiments/') or '..' in args.upload_prefix):
+        p.error('Use an experiments/... upload prefix')
+    args.work.mkdir(parents=True, exist_ok=True)
+    output_path = args.work / 'evaluation.json'
+    if output_path.exists():
+        p.error('Output exists; use a new work directory')
+    torch.set_num_threads(4)
+    api = HfApi()
+    info = api.dataset_info(REPO, revision=CHECKPOINT_REVISION, files_metadata=True)
+    if not info.private:
+        raise ValueError('Expected private checkpoint repository')
+    entry = next(s for s in info.siblings if s.rfilename == CHECKPOINT)
+    path = Path(hf_hub_download(REPO, CHECKPOINT, repo_type='dataset', revision=CHECKPOINT_REVISION))
+    if not entry.lfs or base.file_sha(path) != entry.lfs.sha256:
+        raise ValueError('Checkpoint hash mismatch')
+    saved = torch.load(path, map_location=args.device, weights_only=True)
+    run = saved['run']
+    if (run['source'], run['target'], run['training_script_sha256'], run['architecture_script_sha256']) != (
+            'smol', 'qwen', base.file_sha(Path(__file__).with_name('train_cache_attention.py')),
+            base.file_sha(Path(__file__).with_name('cache_attention.py'))):
+        raise ValueError('Checkpoint code or model identity mismatch')
+    dataset_args = SimpleNamespace(local_data=None, data_root=args.data_root, work=args.work,
+                                   source=run['source'], target=run['target'], pilot=False)
+    data = Dataset(dataset_args)
+    if data.manifest_sha != run['manifest_sha256'] or [s['id'] for s in data.validation] != run['validation_ids']:
+        raise ValueError('Validation dataset does not match checkpoint')
+    mapper = CacheAttention(run['config']).to(args.device)
+    mapper.load_state_dict(saved['model'])
+    mapper.eval()
+    spec = base.MODELS[run['target']]
+    tokenizer = AutoTokenizer.from_pretrained(spec['id'], revision=spec['revision'])
+    receiver = AutoModelForCausalLM.from_pretrained(spec['id'], revision=spec['revision'], dtype=torch.float32,
+                                                    attn_implementation='eager').eval().to(args.device)
+    receiver.requires_grad_(False)
+    eos = receiver.generation_config.eos_token_id
+    eos_ids = set(eos if isinstance(eos, list) else [eos])
+    translation_args = SimpleNamespace(source=run['source'], target=run['target'], device=args.device, batch=run['batch'])
+    rows = []
+    for sample in data.validation[:args.limit]:
+        source = data.features(sample, run['source'])
+        target = data.features(sample, run['target'])
+        tokens = torch.tensor([sample['tokens'][run['target']]['ids']], device=args.device)
+        prefix_len = tokens.shape[1] - 1
+        with torch.inference_mode():
+            native = native_start(receiver, tokens)
+            control = cached_start(receiver, target[:prefix_len].to(args.device), tokens[:, -1:])
+            control_error = (native.logits - control.logits).abs().max().item()
+            if not torch.allclose(native.logits, control.logits, rtol=1e-3, atol=1e-3):
+                raise ValueError(f'Native cache replay failed: {sample["id"]}')
+            native_tokens = continue_greedy(receiver, native, args.tokens, eos_ids)
+            control_tokens = continue_greedy(receiver, control, args.tokens, eos_ids)
+            if native_tokens != control_tokens:
+                raise ValueError(f'Native cache continuation diverged: {sample["id"]}')
+            row = {'id': sample['id'], 'prompt_tokens': tokens.shape[1], 'control_max_logit_error': control_error,
+                   'native_tokens': native_tokens, 'native_text': tokenizer.decode(native_tokens, skip_special_tokens=True),
+                   'methods': {}}
+            def native_fn():
+                return native_start(receiver, tokens)
+            row['native_ms'] = timed(native_fn, args.device, args.repeats)
+            for affine, name in [(True, 'affine'), (False, 'attention')]:
+                def mapped_fn():
+                    features = translate_prefix(mapper, source, sample, translation_args, prefix_len, affine)
+                    return cached_start(receiver, features, tokens[:, -1:])
+                measurements = timed(mapped_fn, args.device, args.repeats)
+                generated = continue_greedy(receiver, mapped_fn(), args.tokens, eos_ids)
+                row['methods'][name] = dict(prefix_agreement(native_tokens, generated), tokens=generated,
+                    text=tokenizer.decode(generated, skip_special_tokens=True), handoff_ms=measurements)
+            rows.append(row)
+        print(f'Evaluated {len(rows)}/{min(args.limit, len(data.validation))}: {sample["id"]}', flush=True)
+    report = {'dataset_revision': run['dataset_revision'], 'checkpoint_revision': CHECKPOINT_REVISION,
+              'checkpoint': CHECKPOINT, 'checkpoint_sha256': entry.lfs.sha256, 'split': 'validation',
+              'note': 'Development prompts used for checkpoint selection; not a held-out final test.',
+              'generation': {'mode': 'greedy', 'max_new_tokens': args.tokens, 'eos_ids': sorted(eos_ids)},
+              'timing': {'repeats': args.repeats, 'warmups': 1,
+                  'scope': 'native GPU prefill to first-token logits vs CPU source-cache mapping, alignment, CPU-to-GPU copy, RoPE/cache construction and first-token logits on one GPU; excludes source prefill, disk I/O and tokenization; does not represent GPU-to-GPU handoff'},
+              'samples': rows}
+    report['summary'] = {'prompts': len(rows), 'native_median_ms': statistics.median(statistics.median(r['native_ms']) for r in rows),
+        'native_immediate_eos': sum(r['native_tokens'][0] in eos_ids for r in rows), 'methods': {}}
+    for name in ('affine', 'attention'):
+        report['summary']['methods'][name] = {'first_token_agreement': sum(r['methods'][name]['first_token_match'] for r in rows) / len(rows),
+            'exact_sequence_agreement': sum(r['methods'][name]['sequence_equal'] for r in rows) / len(rows),
+            'mean_matching_prefix_tokens': statistics.mean(r['methods'][name]['matching_prefix_tokens'] for r in rows),
+            'median_handoff_ms': statistics.median(statistics.median(r['methods'][name]['handoff_ms']) for r in rows),
+            'immediate_eos': sum(r['methods'][name]['tokens'][0] in eos_ids for r in rows)}
+    base.write_json(output_path, report)
+    if args.upload_prefix:
+        current = api.dataset_info(REPO, files_metadata=True)
+        if not current.private or any(s.rfilename.startswith(args.upload_prefix + '/') for s in current.siblings):
+            raise ValueError('Dataset is public or output prefix already exists')
+        commit = api.upload_file(repo_id=REPO, repo_type='dataset', path_or_fileobj=str(output_path),
+                                 path_in_repo=f'{args.upload_prefix}/evaluation.json', parent_commit=current.sha,
+                                 commit_message='Add free-running cache mapper evaluation')
+        info = api.dataset_info(REPO, revision=commit.oid, files_metadata=True)
+        entry = next(s for s in info.siblings if s.rfilename == f'{args.upload_prefix}/evaluation.json')
+        import hashlib
+        content = output_path.read_bytes()
+        digest = hashlib.sha256(content).hexdigest() if entry.lfs else hashlib.sha1(b'blob ' + str(len(content)).encode() + b'\0' + content).hexdigest()
+        if not info.private or digest != (entry.lfs.sha256 if entry.lfs else entry.blob_id):
+            raise ValueError('Evaluation upload verification failed; local report retained')
+        print(f'Uploaded and verified evaluation: {commit.oid}', flush=True)
+    print('COMPLETE: ' + json.dumps(report['summary']), flush=True)
+
+
+if __name__ == '__main__':
+    main()
