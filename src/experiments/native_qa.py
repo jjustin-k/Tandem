@@ -30,6 +30,7 @@ REVISION = 'df88b670d7d71b77eeffdd873143c40d62b8306b'
 PREFIX = 'runs/hotpot-200-20261028'
 MANIFEST_SHA256 = 'b88a13e01fd31f9fe56e2dd05b10e6703279080d3669f033c131ecfcdb0b9532'
 LABELS_SHA256 = '99fbad2b671a5df2598e0e612fc9de709c9daac7492b246943b274096111e5eb'
+ANSWER_CUE = ' '
 MODELS = {
     'qwen': {'id': 'Qwen/Qwen2.5-0.5B-Instruct', 'revision': '7ae557604adf67be50417f59c2c2f167def9a775', 'type': 'qwen2'},
     'smol': {'id': 'HuggingFaceTB/SmolLM2-360M-Instruct', 'revision': 'a10cc1512eabd3dde888204e902eca88bddb4951', 'type': 'llama'},
@@ -107,22 +108,28 @@ def main():
     result = {'dataset': REPO, 'dataset_revision': REVISION, 'manifest_sha256': MANIFEST_SHA256,
               'labels_sha256': LABELS_SHA256, 'split': 'validation', 'prompt_count': len(selected),
               'device': args.device, 'torch': torch.__version__, 'max_new_tokens': args.max_new_tokens,
-              'decoding': 'greedy', 'answer_extraction': 'first generated line', 'models': {}}
+              'decoding': 'greedy', 'answer_cue': ANSWER_CUE,
+              'answer_extraction': 'first generated line', 'models': {}}
     for alias in args.models:
         spec = MODELS[alias]
         tokenizer = AutoTokenizer.from_pretrained(spec['id'], revision=spec['revision'])
+        # Tokenize the cue separately: the saved prompt token IDs must remain an
+        # exact prefix for comparison with replayed or translated caches.
+        cue_ids = tokenizer(ANSWER_CUE, add_special_tokens=False)['input_ids']
+        if not cue_ids:
+            raise ValueError('Answer cue did not produce any tokens')
         model = AutoModelForCausalLM.from_pretrained(spec['id'], revision=spec['revision'], dtype=torch.float32, attn_implementation='eager').eval().to(args.device)
         rows = []
         for sample in selected:
             token_ids = tokenizer(sample['text'], add_special_tokens=False)['input_ids']
             if token_ids != sample['tokens'][alias]['ids']:
                 raise ValueError(f'Tokenizer mismatch: {sample["id"]}')
-            tokens = torch.tensor([token_ids], device=args.device)
+            tokens = torch.tensor([token_ids + cue_ids], device=args.device)
             with torch.inference_mode():
                 generated = model.generate(input_ids=tokens, attention_mask=torch.ones_like(tokens),
                     max_new_tokens=args.max_new_tokens, do_sample=False, num_beams=1, use_cache=True,
                     pad_token_id=tokenizer.eos_token_id)
-            continuation = generated[0, len(token_ids):]
+            continuation = generated[0, len(token_ids) + len(cue_ids):]
             decoded = tokenizer.decode(continuation, skip_special_tokens=True).strip()
             prediction = decoded.split('\n', 1)[0].strip()
             answer = answers[sample['id']]['answer']
@@ -131,7 +138,8 @@ def main():
                          'generated_tokens': len(continuation), 'reached_token_limit': len(continuation) == args.max_new_tokens,
                          'exact_match': exact, 'f1': f1})
             print(f'{alias} {len(rows)}/{len(selected)}: {sample["id"]} EM={exact:.0f} F1={f1:.3f}', flush=True)
-        result['models'][alias] = {'model': spec, 'exact_match': sum(r['exact_match'] for r in rows) / len(rows),
+        result['models'][alias] = {'model': spec, 'cue_token_ids': cue_ids,
+                                   'exact_match': sum(r['exact_match'] for r in rows) / len(rows),
                                    'f1': sum(r['f1'] for r in rows) / len(rows), 'samples': rows}
         del model, tokenizer
         if args.device == 'cuda':
