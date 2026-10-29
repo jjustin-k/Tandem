@@ -1,5 +1,7 @@
 """Continuation alignment and gradients, without model or dataset downloads."""
 import sys
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -8,10 +10,78 @@ import torch
 from transformers import Qwen2Config, Qwen2ForCausalLM
 import paired_kv_dataset as base
 from train_cache_attention import stack_features, receiver_logits, logit_kl
-from calibrate_cache_attention import continuation_inputs, teacher_logits
+from calibrate_cache_attention import (continuation_inputs, teacher_logits, stopping_update,
+                                       save_progress, restore_progress)
 
 
 class ContinuationTests(unittest.TestCase):
+    def test_stopping_requires_five_unimproved_passes_and_resets_on_improvement(self):
+        best, stale = 2., 0
+        for _ in range(4):
+            best, stale, improved = stopping_update(2., best, stale)
+            self.assertFalse(improved)
+            self.assertLess(stale, 5)
+        best, stale, improved = stopping_update(1.9, best, stale)
+        self.assertTrue(improved)
+        self.assertEqual(stale, 0)
+        for _ in range(5):
+            best, stale, _ = stopping_update(2., best, stale)
+        self.assertEqual(stale, 5)
+        with self.assertRaises(ValueError):
+            stopping_update(float('nan'), best, stale)
+
+    def test_resume_preserves_adam_updates_rng_and_partial_pass(self):
+        torch.manual_seed(21)
+        model = torch.nn.Linear(2, 1)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=.01)
+        provenance = dict.fromkeys(('parent_revision', 'parent_checkpoint', 'parent_sha256',
+            'parent_run', 'tokens', 'handoff_prompt_tokens', 'lr', 'seed', 'train_ids',
+            'validation_ids', 'pilot', 'objective'), 'same')
+        run = {'parent': 'test'}
+        state = dict(epoch=1, position=1, steps=4, best=1.5, stale=2,
+                     epoch_loss_sum=2., epoch_loss_count=1)
+        x = torch.tensor([[1., 2.]])
+        def step(m, opt):
+            opt.zero_grad()
+            m(x).square().sum().backward()
+            opt.step()
+        step(model, optimizer)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            save_progress(out, model, optimizer, run, provenance, state)
+            expected_random = torch.rand(3)
+            step(model, optimizer)
+            other = torch.nn.Linear(2, 1)
+            other_opt = torch.optim.AdamW(other.parameters(), lr=.01)
+            restored, reset = restore_progress(out, other, other_opt, run, provenance, 3, 'cpu')
+            self.assertFalse(reset)
+            self.assertEqual(restored, state)
+            torch.testing.assert_close(torch.rand(3), expected_random)
+            step(other, other_opt)
+            for a, b in zip(model.parameters(), other.parameters()):
+                torch.testing.assert_close(a, b, atol=0, rtol=0)
+            with self.assertRaisesRegex(ValueError, 'configuration mismatch'):
+                restore_progress(out, other, other_opt, run, dict(provenance, tokens='changed'), 3, 'cpu')
+
+    def test_legacy_resume_keeps_completed_passes_and_reports_optimizer_reset(self):
+        model = torch.nn.Linear(2, 1)
+        optimizer = torch.optim.AdamW(model.parameters())
+        provenance = dict.fromkeys(('parent_revision', 'parent_checkpoint', 'parent_sha256',
+            'parent_run', 'tokens', 'handoff_prompt_tokens', 'lr', 'seed', 'train_ids',
+            'validation_ids', 'pilot', 'objective'), 'same')
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            torch.save({'model': model.state_dict(), 'run': {}, 'calibration': provenance,
+                        'steps': 5}, out / 'last.pt')
+            (out / 'before.json').write_text(json.dumps({'summary': {'kl': 2.}}))
+            rows = [dict(steps=2, prompts_seen_this_epoch=2, validation={'kl': 1.5}),
+                    dict(steps=4, prompts_seen_this_epoch=2, validation={'kl': 1.6})]
+            (out / 'metrics.jsonl').write_text('\n'.join(json.dumps(r) for r in rows))
+            state, reset = restore_progress(out, model, optimizer, {}, provenance, 2, 'cpu')
+            self.assertTrue(reset)
+            self.assertEqual((state['epoch'], state['position'], state['steps']), (2, 1, 5))
+            self.assertEqual((state['best'], state['stale']), (1.5, 1))
+
     def test_continuation_alignment_including_one_token_and_eos(self):
         prompt = torch.tensor([[3, 5, 7]])
         for continuation in ([9], [9, 11, 2]):

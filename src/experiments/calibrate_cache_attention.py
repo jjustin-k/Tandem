@@ -5,6 +5,7 @@
 """Calibrate the existing mapper on native receiver continuations, on one GPU."""
 import argparse
 import json
+import math
 import os
 import random
 import time
@@ -37,6 +38,50 @@ def teacher_logits(receiver, prompt, continuation):
     with torch.no_grad():
         return receiver(input_ids=full, use_cache=False,
                         logits_to_keep=len(continuation)).logits
+
+
+def stopping_update(value, best, stale):
+    if not math.isfinite(value):
+        raise ValueError('Nonfinite validation loss')
+    return (value, 0, True) if value < best else (best, stale + 1, False)
+
+
+def restore_progress(out, mapper, optimizer, run, provenance, train_count, device):
+    saved = torch.load(out / 'last.pt', map_location=device, weights_only=True)
+    old = saved['calibration']
+    identity = ('parent_revision', 'parent_checkpoint', 'parent_sha256', 'parent_run',
+                'tokens', 'handoff_prompt_tokens', 'lr', 'seed', 'train_ids',
+                'validation_ids', 'pilot', 'objective')
+    if saved['run'] != run or any(old[k] != provenance[k] for k in identity):
+        raise ValueError('Resume checkpoint configuration mismatch')
+    mapper.load_state_dict(saved['model'])
+    if 'training_state' in saved:
+        optimizer.load_state_dict(saved['optimizer'])
+        torch.set_rng_state(saved['rng_state'].cpu())
+        if 'cuda_rng_state' in saved:
+            torch.cuda.set_rng_state(saved['cuda_rng_state'].cpu())
+        return saved['training_state'], False
+    # V1 saved weights and update counts, but omitted Adam moments. Continue
+    # weights with a fresh optimizer and preserve that limitation in provenance.
+    steps = saved['steps']
+    epoch, position = divmod(steps, train_count)
+    best = json.loads((out / 'before.json').read_text())['summary']['kl']
+    stale = 0
+    metrics = out / 'metrics.jsonl'
+    for row in (json.loads(line) for line in (metrics.read_text().splitlines() if metrics.exists() else []) if line.strip()):
+        if row['steps'] <= steps and row['prompts_seen_this_epoch'] == train_count:
+            best, stale, _ = stopping_update(row['validation']['kl'], best, stale)
+    return {'epoch': epoch, 'position': position, 'steps': steps, 'best': best,
+            'stale': stale, 'epoch_loss_sum': 0., 'epoch_loss_count': 0}, True
+
+
+def save_progress(out, mapper, optimizer, run, provenance, state):
+    payload = {'model': mapper.state_dict(), 'run': run, 'calibration': provenance,
+               'steps': state['steps'], 'optimizer': optimizer.state_dict(),
+               'training_state': dict(state), 'rng_state': torch.get_rng_state()}
+    if next(mapper.parameters()).is_cuda:
+        payload['cuda_rng_state'] = torch.cuda.get_rng_state()
+    checkpoint(out / 'last.pt', payload)
 
 
 def score(mapper, receiver, data, samples, traces, args, greedy=False):
@@ -77,7 +122,9 @@ def main():
     p.add_argument('--work', required=True, type=Path)
     p.add_argument('--data-root', required=True, type=Path)
     p.add_argument('--pilot', action='store_true', help='Eight train / four validation prompts')
-    p.add_argument('--epochs', type=int, default=4)
+    p.add_argument('--epochs', type=int, default=30, help='Total passes, including completed passes when resuming')
+    p.add_argument('--patience', type=int, default=5, help='Stop after this many complete passes without validation KL improvement')
+    p.add_argument('--resume', action='store_true')
     p.add_argument('--tokens', type=int, default=32, help='Use 1 for the matched one-token calibration control')
     p.add_argument('--lr', type=float, default=1e-4)
     p.add_argument('--seed', type=int, default=20261029)
@@ -85,7 +132,7 @@ def main():
     p.add_argument('--upload-prefix', required=True)
     args = p.parse_args()
     args.device = 'cuda'
-    if min(args.epochs, args.tokens, args.lr, args.hours) <= 0:
+    if min(args.epochs, args.tokens, args.lr, args.hours, args.patience) <= 0:
         p.error('Training budgets must be positive')
     if args.tokens > 32:
         p.error('This bounded experiment supports at most 32 continuation tokens')
@@ -96,10 +143,20 @@ def main():
     args.work.mkdir(parents=True, exist_ok=True)
     lock = lock_workdir(args.work)
     out = args.work / 'outputs'
-    if out.exists():
+    if out.exists() and not args.resume:
         p.error('Work directory already contains outputs; use a new directory')
+    if args.resume and not all((out / name).exists() for name in
+                              ('last.pt', 'best.pt', 'run.json', 'before.json', 'train-before.json', 'native-traces.json')):
+        p.error('Resume requires an existing calibration checkpoint and baseline outputs')
     api = HfApi()
-    check_destination(api, args.upload_prefix)
+    if args.resume:
+        if not api.dataset_info(REPO).private:
+            p.error('Resume destination must be private')
+        receipt = json.loads((args.work / 'upload-receipt.json').read_text())
+        if receipt['prefix'] != args.upload_prefix:
+            p.error('Resume must use the original upload prefix')
+    else:
+        check_destination(api, args.upload_prefix)
     info = api.dataset_info(REPO, revision=CHECKPOINT_REVISION, files_metadata=True)
     if not info.private:
         raise ValueError('Expected private parent checkpoint')
@@ -132,7 +189,7 @@ def main():
     receiver.requires_grad_(False)
     eos = receiver.generation_config.eos_token_id
     args.eos_ids = set(eos if isinstance(eos, list) else [eos])
-    out.mkdir()
+    out.mkdir(exist_ok=args.resume)
     provenance = {'parent_revision': CHECKPOINT_REVISION, 'parent_checkpoint': CHECKPOINT,
         'parent_sha256': entry.lfs.sha256, 'parent_run': run, 'tokens': args.tokens,
         'handoff_prompt_tokens': 1, 'epochs': args.epochs, 'lr': args.lr, 'seed': args.seed,
@@ -140,10 +197,24 @@ def main():
         'script_sha256': base.file_sha(Path(__file__)), 'pilot': args.pilot,
         'objective': 'native-continuation teacher-to-student KL + 0.01 standardized prefix KV MSE',
         'evaluation_scope': 'Development validation already used for parent selection; not a final test'}
-    base.write_json(out / 'run.json', provenance)
-    traces = {}
+    optimizer = torch.optim.AdamW(mapper.parameters(), lr=args.lr, weight_decay=1e-4)
+    state = None
+    if args.resume:
+        state, reset_optimizer = restore_progress(out, mapper, optimizer, run, provenance, len(train), args.device)
+        provenance['resume'] = {'from_steps': state['steps'], 'optimizer_reset': reset_optimizer,
+                                'previous_run': json.loads((out / 'run.json').read_text())}
+        provenance['patience'] = args.patience
+        base.write_json(out / f'resume-{time.time_ns()}.json', provenance)
+        print(f"RESUME: {state['steps']} updates, {state['epoch']} complete passes; optimizer_reset={reset_optimizer}", flush=True)
+    else:
+        provenance['patience'] = args.patience
+        base.write_json(out / 'run.json', provenance)
+    traces = json.loads((out / 'native-traces.json').read_text()) if args.resume else {}
+    expected_ids = {s['id'] for s in train + validation}
+    if args.resume and (set(traces) != expected_ids or any(not 0 < len(t) <= args.tokens for t in traces.values())):
+        raise ValueError('Saved continuation traces do not match this run')
     with torch.no_grad():
-        for sample in train + validation:
+        for sample in ([] if args.resume else train + validation):
             ids = torch.tensor([sample['tokens'][args.target]['ids']], device=args.device)
             native = native_start(receiver, ids)
             control = cached_start(receiver, data.features(sample, args.target)[:-1].to(args.device), ids[:, -1:])
@@ -153,25 +224,33 @@ def main():
             if trace != continue_greedy(receiver, control, args.tokens, args.eos_ids):
                 raise ValueError('Native continuation control failed')
             traces[sample['id']] = trace
-    base.write_json(out / 'native-traces.json', traces)
-    before = score(mapper, receiver, data, validation, traces, args, greedy=True)
-    base.write_json(out / 'before.json', before)
-    train_before = score(mapper, receiver, data, train[:8], traces, args, greedy=True)
-    base.write_json(out / 'train-before.json', train_before)
+    if args.resume:
+        before = json.loads((out / 'before.json').read_text())
+        train_before = json.loads((out / 'train-before.json').read_text())
+        score(mapper, receiver, data, validation, traces, args)  # Recheck native replay on this device.
+    else:
+        base.write_json(out / 'native-traces.json', traces)
+        before = score(mapper, receiver, data, validation, traces, args, greedy=True)
+        base.write_json(out / 'before.json', before)
+        train_before = score(mapper, receiver, data, train[:8], traces, args, greedy=True)
+        base.write_json(out / 'train-before.json', train_before)
+        checkpoint(out / 'best.pt', {'model': mapper.state_dict(), 'run': run, 'calibration': provenance})
+        state = {'epoch': 0, 'position': 0, 'steps': 0, 'best': before['summary']['kl'],
+                 'stale': 0, 'epoch_loss_sum': 0., 'epoch_loss_count': 0}
+        save_progress(out, mapper, optimizer, run, provenance, state)
     print('BEFORE: '+json.dumps(before['summary']), flush=True)
-    best = before['summary']['kl']
-    checkpoint(out / 'best.pt', {'model': mapper.state_dict(), 'run': run, 'calibration': provenance})
     upload_outputs(args)
-    optimizer = torch.optim.AdamW(mapper.parameters(), lr=args.lr, weight_decay=1e-4)
-    steps, stopped = 0, False
-    for epoch in range(args.epochs):
+    stopped = False
+    for epoch in range(state['epoch'], args.epochs):
+        if state['stale'] >= args.patience:
+            break
         order = list(train)
         random.Random(args.seed + epoch).shuffle(order)
-        losses = []
-        for sample in order:
+        for position in range(state['position'], len(order)):
             if time.perf_counter() - started >= args.hours * 3600:
                 stopped = True
                 break
+            sample = order[position]
             mapper.train()
             ids = torch.tensor([sample['tokens'][args.target]['ids']], device=args.device)
             source, target = data.features(sample, args.source), data.features(sample, args.target)
@@ -190,34 +269,40 @@ def main():
             loss.backward()
             torch.nn.utils.clip_grad_norm_(mapper.parameters(), 1., error_if_nonfinite=True)
             optimizer.step()
-            losses.append(loss.item())
-            steps += 1
-            if steps % 10 == 0:
-                print(f'Epoch {epoch+1}/{args.epochs}, prompt {len(losses)}/{len(train)}: {loss.item():.5f}', flush=True)
-            if steps % 25 == 0:
-                checkpoint(out / 'last.pt', {'model': mapper.state_dict(), 'run': run,
-                           'calibration': provenance, 'steps': steps})
+            state['epoch_loss_sum'] += loss.item()
+            state['epoch_loss_count'] += 1
+            state['steps'] += 1
+            state['position'] = position + 1
+            if state['steps'] % 10 == 0:
+                print(f"Epoch {epoch+1}/{args.epochs}, prompt {position+1}/{len(train)}: {loss.item():.5f}", flush=True)
+            if state['steps'] % 25 == 0:
+                save_progress(out, mapper, optimizer, run, provenance, state)
                 upload_outputs(args)
+        if stopped:
+            save_progress(out, mapper, optimizer, run, provenance, state)
+            upload_outputs(args)
+            break
         validation_score = score(mapper, receiver, data, validation, traces, args)
-        if validation_score['summary']['kl'] < best:
-            best = validation_score['summary']['kl']
+        state['best'], state['stale'], improved = stopping_update(validation_score['summary']['kl'], state['best'], state['stale'])
+        if improved:
             checkpoint(out / 'best.pt', {'model': mapper.state_dict(), 'run': run, 'calibration': provenance})
-        row = {'epoch': epoch+1, 'steps': steps, 'prompts_seen_this_epoch': len(losses),
-               'training_loss': sum(losses)/len(losses) if losses else None,
-               'validation': validation_score['summary'], 'elapsed_seconds': time.perf_counter()-started}
+        row = {'epoch': epoch+1, 'steps': state['steps'], 'prompts_seen_this_epoch': len(train),
+               'training_loss': state['epoch_loss_sum']/state['epoch_loss_count'] if state['epoch_loss_count'] else None,
+               'validation': validation_score['summary'], 'stale_epochs': state['stale'],
+               'elapsed_seconds': time.perf_counter()-started}
         with (out / 'metrics.jsonl').open('a') as f:
             f.write(json.dumps(row)+'\n')
         print(json.dumps(row), flush=True)
-        checkpoint(out / 'last.pt', {'model': mapper.state_dict(), 'run': run,
-                   'calibration': provenance, 'steps': steps})
+        state.update(epoch=epoch+1, position=0, epoch_loss_sum=0., epoch_loss_count=0)
+        save_progress(out, mapper, optimizer, run, provenance, state)
         upload_outputs(args)
-        if stopped:
-            break
     mapper.load_state_dict(torch.load(out / 'best.pt', map_location=args.device, weights_only=True)['model'])
     after = score(mapper, receiver, data, validation, traces, args, greedy=True)
     train_after = score(mapper, receiver, data, train[:8], traces, args, greedy=True)
     result = {'before': before, 'after': after, 'train_before': train_before,
-              'train_after': train_after, 'steps': steps, 'budget_reached': stopped,
+              'train_after': train_after, 'steps': state['steps'], 'budget_reached': stopped,
+              'complete_epochs': state['epoch'], 'early_stopped': state['stale'] >= args.patience,
+              'patience': args.patience, 'epochs_requested': args.epochs,
               'wall_seconds': time.perf_counter()-started,
               'peak_cuda_allocated_bytes': torch.cuda.max_memory_allocated()}
     base.write_json(out / 'comparison.json', result)
