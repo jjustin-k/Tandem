@@ -68,3 +68,17 @@ uv run --locked --script src/experiments/evaluate_cache_attention.py \
   --work /path/to/evaluation --data-root /path/to/shared-feature-cache \
   --device cuda --upload-prefix experiments/your-unique-evaluation
 ```
+
+## Continuation calibration
+
+`calibrate_cache_attention.py` starts from the pinned behavior-selected checkpoint and reuses the existing feature cache. Native Qwen generates up to 32 tokens per prompt. The translated path receives the final prompt token and the preceding native continuation tokens; logit KL supervises each generated position, with 0.01 standardized prefix K/V MSE anchoring. Both LLMs stay frozen. This is teacher-forced distillation on native continuations; independent greedy generation is measured before and after training.
+
+Use `--pilot --epochs 2` for eight training and four validation prompts. Inspect `outputs/comparison.json` and measured GPU memory before expanding. The full run defaults to four shuffled passes over all 160 training prompts. `--tokens 1` provides the one-token calibration control under the same number of prompt updates. Select the checkpoint by validation continuation KL, retaining the parent if calibration does not improve it. Reports also compare generation on eight training prompts to distinguish fitting from generalization. Existing validation remains development data.
+
+```sh
+CUDA_VISIBLE_DEVICES=1 uv run --locked --script src/experiments/calibrate_cache_attention.py \
+  --work /path/to/new-pilot --data-root /path/to/existing-feature-cache \
+  --pilot --epochs 2 --upload-prefix experiments/your-unique-continuation-pilot
+```
+
+Native cache logits and greedy continuations must match native prefill before training. Outputs include trace token IDs, parent checkpoint identity, configuration, metrics and remotely verified checkpoints. Checkpoints upload every 25 steps and each epoch. The script refuses reused output directories and remote prefixes; a work-directory lock prevents duplicate launches. The soft time budget is checked between training prompts and excludes final evaluation time. Restart after interruption from a new directory; automatic resume is not implemented.
