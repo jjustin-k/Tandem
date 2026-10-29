@@ -102,6 +102,7 @@ def main():
     p.add_argument('--limit', type=int, default=40)
     p.add_argument('--tokens', type=int, default=32)
     p.add_argument('--repeats', type=int, default=5)
+    p.add_argument('--checkpoint-file', type=Path, help='Evaluate a saved local mapper instead of the original cloud checkpoint')
     p.add_argument('--upload-prefix', help='Unique experiments/... destination')
     args = p.parse_args()
     if min(args.limit, args.tokens, args.repeats) < 1 or args.limit > 40:
@@ -119,13 +120,20 @@ def main():
     api = HfApi()
     if args.upload_prefix:
         check_destination(api, args.upload_prefix)
-    info = api.dataset_info(REPO, revision=CHECKPOINT_REVISION, files_metadata=True)
-    if not info.private:
-        raise ValueError('Expected private checkpoint repository')
-    entry = next(s for s in info.siblings if s.rfilename == CHECKPOINT)
-    path = Path(hf_hub_download(REPO, CHECKPOINT, repo_type='dataset', revision=CHECKPOINT_REVISION))
-    if not entry.lfs or base.file_sha(path) != entry.lfs.sha256:
-        raise ValueError('Checkpoint hash mismatch')
+    if args.checkpoint_file:
+        path = args.checkpoint_file
+        checkpoint_sha = base.file_sha(path)
+        checkpoint_revision, checkpoint_name = None, str(path.resolve())
+    else:
+        info = api.dataset_info(REPO, revision=CHECKPOINT_REVISION, files_metadata=True)
+        if not info.private:
+            raise ValueError('Expected private checkpoint repository')
+        entry = next(s for s in info.siblings if s.rfilename == CHECKPOINT)
+        path = Path(hf_hub_download(REPO, CHECKPOINT, repo_type='dataset', revision=CHECKPOINT_REVISION))
+        if not entry.lfs or base.file_sha(path) != entry.lfs.sha256:
+            raise ValueError('Checkpoint hash mismatch')
+        checkpoint_sha = entry.lfs.sha256
+        checkpoint_revision, checkpoint_name = CHECKPOINT_REVISION, CHECKPOINT
     saved = torch.load(path, map_location=args.device, weights_only=True)
     run = saved['run']
     if (run['source'], run['target'], run['training_script_sha256'], run['architecture_script_sha256']) != (
@@ -180,8 +188,8 @@ def main():
                     text=tokenizer.decode(generated, skip_special_tokens=True), handoff_ms=measurements)
             rows.append(row)
         print(f'Evaluated {len(rows)}/{min(args.limit, len(data.validation))}: {sample["id"]}', flush=True)
-    report = {'dataset_revision': run['dataset_revision'], 'checkpoint_revision': CHECKPOINT_REVISION,
-              'checkpoint': CHECKPOINT, 'checkpoint_sha256': entry.lfs.sha256, 'split': 'validation',
+    report = {'dataset_revision': run['dataset_revision'], 'checkpoint_revision': checkpoint_revision,
+              'checkpoint': checkpoint_name, 'checkpoint_sha256': checkpoint_sha, 'split': 'validation',
               'note': 'Development prompts used for checkpoint selection; not a held-out final test.',
               'generation': {'mode': 'greedy', 'max_new_tokens': args.tokens, 'eos_ids': sorted(eos_ids)},
               'timing': {'repeats': args.repeats, 'warmups': 1,
