@@ -10,7 +10,7 @@ import torch
 from transformers import Qwen2Config, Qwen2ForCausalLM
 import paired_kv_dataset as base
 from train_cache_attention import stack_features
-from evaluate_cache_attention import native_start, cached_start, continue_greedy, prefix_agreement, timed, lock_workdir, check_destination, handoff_prefix_length
+from evaluate_cache_attention import native_start, cached_start, continue_greedy, prefix_agreement, timed, lock_workdir, check_destination, handoff_prefix_length, replace_cache_component
 
 
 class EvaluationTests(unittest.TestCase):
@@ -35,6 +35,21 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(prefix_agreement([7], [7, 8])['matching_prefix_tokens'], 1)
         self.assertFalse(prefix_agreement([7], [7, 8])['sequence_equal'])
 
+    def test_oracle_substitution_preserves_the_other_component_and_inputs(self):
+        native = torch.arange(48, dtype=torch.float32).reshape(3, 2, 2, 4)
+        mapped = native + 100
+        for component, role in [('keys', 0), ('values', 1)]:
+            result = replace_cache_component(mapped, native, component)
+            torch.testing.assert_close(result[:, role], native[:, role])
+            torch.testing.assert_close(result[:, 1-role], mapped[:, 1-role])
+            result.zero_()
+            torch.testing.assert_close(mapped, native + 100)
+            self.assertEqual(native.sum().item(), sum(range(48)))
+        with self.assertRaises(ValueError):
+            replace_cache_component(mapped[:-1], native, 'keys')
+        with self.assertRaises(ValueError):
+            replace_cache_component(mapped, native, 'both')
+
     def test_native_prefill_and_saved_cache_generate_identically(self):
         torch.manual_seed(3)
         torch.set_num_threads(2)
@@ -55,6 +70,14 @@ class EvaluationTests(unittest.TestCase):
                 b = cached_start(model, features[:prefix], tokens[:, prefix:])
                 torch.testing.assert_close(a.logits, b.logits, atol=1e-5, rtol=1e-4)
                 self.assertEqual(continue_greedy(model, a, 6, set()), continue_greedy(model, b, 6, set()))
+                for component, role in [('keys', 0), ('values', 1)]:
+                    damaged = features[:prefix].clone()
+                    damaged[:, role] += torch.randn_like(damaged[:, role]) * 5
+                    repaired = replace_cache_component(damaged, features[:prefix], component)
+                    a = native_start(model, tokens)
+                    b = cached_start(model, repaired, tokens[:, prefix:])
+                    torch.testing.assert_close(a.logits, b.logits, atol=1e-5, rtol=1e-4)
+                    self.assertEqual(continue_greedy(model, a, 6, set()), continue_greedy(model, b, 6, set()))
         count = []
         self.assertEqual(len(timed(lambda: count.append(1), 'cpu', 3)), 3)
         self.assertEqual(len(count), 4)  # One warm-up plus three timed runs.

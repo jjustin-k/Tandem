@@ -5,6 +5,7 @@
 """Free-running and warm-timing evaluation of the existing mapper checkpoint."""
 import argparse
 import json
+import math
 import os
 import statistics
 import time
@@ -41,6 +42,16 @@ def handoff_prefix_length(sample, target, handoff):
     if not 0 < start < length:
         raise ValueError('Handoff requires a nonempty cache prefix and prompt suffix')
     return start
+
+
+def replace_cache_component(mapped, native, component):
+    """Oracle intervention in pre-RoPE feature space; never modify either input."""
+    if mapped.shape != native.shape or mapped.ndim != 4 or mapped.shape[1] != 2:
+        raise ValueError('Expected matching [tokens, K/V, layer-heads, head-dim] features')
+    if component not in ('keys', 'values'):
+        raise ValueError('Choose native keys or native values')
+    return torch.stack((native[:, 0] if component == 'keys' else mapped[:, 0],
+                        native[:, 1] if component == 'values' else mapped[:, 1]), dim=1)
 
 
 def continue_greedy(receiver, output, max_new_tokens, eos_ids):
@@ -112,6 +123,8 @@ def main():
     p.add_argument('--repeats', type=int, default=5)
     p.add_argument('--handoff', choices=('last-token', 'question'), default='last-token',
                    help='Replay the final prompt token, or the question through Answer:, over the translated prefix')
+    p.add_argument('--kv-ablation', action='store_true',
+                   help='Also replace translated attention keys or values with native target features; diagnostic only')
     p.add_argument('--checkpoint-file', type=Path, help='Evaluate a saved local mapper instead of the original cloud checkpoint')
     p.add_argument('--upload-prefix', help='Unique experiments/... destination')
     args = p.parse_args()
@@ -166,6 +179,9 @@ def main():
     eos = receiver.generation_config.eos_token_id
     eos_ids = set(eos if isinstance(eos, list) else [eos])
     translation_args = SimpleNamespace(source=run['source'], target=run['target'], device=args.device, batch=run['batch'])
+    methods = {'affine': (True, None), 'attention': (False, None)}
+    if args.kv_ablation:
+        methods.update(native_keys_mapped_values=(False, 'keys'), mapped_keys_native_values=(False, 'values'))
     rows = []
     for sample in data.validation[:args.limit]:
         source = data.features(sample, run['source'])
@@ -190,17 +206,22 @@ def main():
             def native_fn():
                 return native_start(receiver, tokens)
             row['native_ms'] = timed(native_fn, args.device, args.repeats)
-            for affine, name in [(True, 'affine'), (False, 'attention')]:
+            for name, (affine, native_component) in methods.items():
                 def mapped_fn():
                     features = translate_prefix(mapper, source, sample, translation_args, prefix_len, affine)
+                    if native_component:
+                        features = replace_cache_component(features, target[:prefix_len].to(args.device), native_component)
                     return cached_start(receiver, features, suffix)
-                measurements = timed(mapped_fn, args.device, args.repeats)
+                measurements = [] if native_component else timed(mapped_fn, args.device, args.repeats)
                 output = mapped_fn()
                 first_kl = logit_kl(output.logits, native.logits).item()
+                if not math.isfinite(first_kl):
+                    raise ValueError(f'Nonfinite first-token KL: {sample["id"]}, {name}')
                 native_token = native.logits[0, -1].argmax()
                 native_rank = 1 + (output.logits[0, -1] > output.logits[0, -1, native_token]).sum().item()
                 generated = continue_greedy(receiver, output, args.tokens, eos_ids)
                 row['methods'][name] = dict(prefix_agreement(native_tokens, generated), tokens=generated,
+                    oracle_native_component=native_component,
                     first_token_kl=first_kl, native_first_token_rank=native_rank,
                     text=tokenizer.decode(generated, skip_special_tokens=True), handoff_ms=measurements)
             rows.append(row)
@@ -208,6 +229,8 @@ def main():
     report = {'dataset_revision': run['dataset_revision'], 'checkpoint_revision': checkpoint_revision,
               'checkpoint': checkpoint_name, 'checkpoint_sha256': checkpoint_sha, 'split': 'validation',
               'handoff': args.handoff,
+              'oracle_kv_ablation': args.kv_ablation,
+              'oracle_note': 'Native-component substitutions require receiver prefill and are diagnostic only. They test interacting components, not an additive decomposition of error. Oracle methods are not timed.' if args.kv_ablation else None,
               'note': 'Development prompts used for checkpoint selection; not a held-out final test.',
               'generation': {'mode': 'greedy', 'max_new_tokens': args.tokens, 'eos_ids': sorted(eos_ids)},
               'timing': {'repeats': args.repeats, 'warmups': 1,
@@ -215,12 +238,12 @@ def main():
               'samples': rows}
     report['summary'] = {'prompts': len(rows), 'native_median_ms': statistics.median(statistics.median(r['native_ms']) for r in rows),
         'native_immediate_eos': sum(r['native_tokens'][0] in eos_ids for r in rows), 'methods': {}}
-    for name in ('affine', 'attention'):
+    for name in methods:
         report['summary']['methods'][name] = {'first_token_agreement': sum(r['methods'][name]['first_token_match'] for r in rows) / len(rows),
             'mean_first_token_kl': statistics.mean(r['methods'][name]['first_token_kl'] for r in rows),
             'exact_sequence_agreement': sum(r['methods'][name]['sequence_equal'] for r in rows) / len(rows),
             'mean_matching_prefix_tokens': statistics.mean(r['methods'][name]['matching_prefix_tokens'] for r in rows),
-            'median_handoff_ms': statistics.median(statistics.median(r['methods'][name]['handoff_ms']) for r in rows),
+            'median_handoff_ms': None if methods[name][1] else statistics.median(statistics.median(r['methods'][name]['handoff_ms']) for r in rows),
             'immediate_eos': sum(r['methods'][name]['tokens'][0] in eos_ids for r in rows)}
     base.write_json(output_path, report)
     if args.upload_prefix:
