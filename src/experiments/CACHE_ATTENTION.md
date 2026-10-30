@@ -91,7 +91,7 @@ To continue, keep the work directory, feature cache and upload prefix, then add 
 
 After evaluation, the finish script uploads and verifies both training-output folders and both evaluation reports, using at most four folder commits. Deferred uploads keep their files on Ada. Rerunning the script reuses matching saved evaluations and retries publication without retraining or regenerating continuations. Keep the Ada cache and output directories until all four uploads are verified.
 
-## Continuation findings and next diagnostic
+## Continuation findings and question-replay diagnostic
 
 The [verified reports](https://huggingface.co/datasets/tandemkv/paired-kv-qwen-smollm/tree/ba8bfb17f27e5e6e10571093814c75a0c1fbef5c/experiments) compare the selected checkpoints on the same 40 development prompts, with up to 32 greedy tokens:
 
@@ -104,7 +104,7 @@ All native replay controls passed. The 32-token model often retains the topic bu
 
 The eight monitored training prompts reach KL 0.613 and a 6.25-token mean matching prefix, versus KL 1.366 and 1.225 tokens on development prompts. This small training subset suggests a generalization gap; it is not a full training-set estimate. Validation KL is best at epoch 23 and then worsens through epoch 28 while training loss falls. More passes are not the priority. Alignment has exact character-end matches for 97.1% of development prompt tokens, but that does not establish accurate mapped features.
 
-Next, compare `--handoff last-token` with `--handoff question` using the **same 32-token checkpoint**. The latter translates the prefix before the first question token, then lets Qwen process the unchanged question and `Answer:` suffix: 10–45 tokens on these prompts. This tests whether recomputing the question helps Qwen use the translated context. It introduces partial receiver prefill and is not HeteroFold's prefill-free method. A gain would support testing question replay further; no gain would leave passage-cache fidelity as a concern. Neither outcome alone localizes a layer, K/V component, or architectural cause.
+Compare `--handoff last-token` with `--handoff question` using the **same 32-token checkpoint**. The latter translates the prefix before the first question token, then lets Qwen process the unchanged question and `Answer:` suffix: 10–45 tokens on these prompts. This tests whether recomputing the question helps Qwen use the translated context. It introduces partial receiver prefill and is not HeteroFold's prefill-free method. Neither outcome alone localizes a layer, K/V component, or architectural cause.
 
 ```sh
 for handoff in last-token question; do
@@ -115,4 +115,13 @@ for handoff in last-token question; do
 done
 ```
 
-Run on one allocated GPU with `CUDA_VISIBLE_DEVICES` set. Each report records the checkpoint hash, handoff mode, replayed token count, first-token KL and rank of the native first token, plus the existing generation metrics. Native saved-cache logits and continuations must match full prefill at each handoff boundary. Compare identical prompt IDs and native continuations across the two reports. This diagnostic needs no training, new shards or answer labels; its GPU results are pending.
+Run on one allocated GPU with `CUDA_VISIBLE_DEVICES` set. Each report records the checkpoint hash, handoff mode, replayed token count, first-token KL and rank of the native first token, plus the existing generation metrics. Native saved-cache logits and continuations must match full prefill at each handoff boundary. Compare identical prompt IDs and native continuations across the two reports. This diagnostic needs no training, new shards or answer labels.
+
+The [completed Ada comparison](https://huggingface.co/datasets/tandemkv/paired-kv-qwen-smollm/tree/8e1f5515e2a5be16531a210a756f35dc70210ca5/experiments/question-replay-20261029-205336) uses identical checkpoint hashes, prompt IDs and native continuations. All native replay controls pass.
+
+| Attention mapper handoff | First-token KL | First token matches | Mean matching prefix | Full continuation matches |
+| --- | ---: | ---: | ---: | ---: |
+| Final prompt token | 2.156 | 19/40 | 1.225 tokens | 0/40 |
+| Question and Answer: suffix | 1.600 | 16/40 | 3.275 tokens | 0/40 |
+
+Question replay lowers first-token KL on 31/40 prompts. Matching prefixes improve on 10 prompts, worsen on eight and remain unchanged on 22; eight now retain at least five leading tokens. Qualitative inspection shows better retention of names and wording supplied in the question, but passage details still change. For example, the boxer example retains “Tumba Silva” from the question while replacing native “Clemente Russo” with “Sven Mikkelsen.” Exact matching also penalizes harmless rephrasing: native “Afghanistan.” becomes “The country where Mashorey is located is Afghanistan.” These results support a partial benefit, not reliable behavior preservation or an identified architectural cause. No additional training ran.
