@@ -17,7 +17,7 @@ from huggingface_hub import HfApi, hf_hub_download
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import paired_kv_dataset as base
 from cache_attention import CacheAttention
-from train_cache_attention import Dataset, REPO, synchronize, to_cache, translate_prefix
+from train_cache_attention import Dataset, REPO, logit_kl, synchronize, to_cache, translate_prefix
 
 CHECKPOINT_REVISION = '3718426b6bd55c354d49912d342958305ac5fe10'
 CHECKPOINT = 'experiments/attention-20261028-221854/full/behavior-best.pt'
@@ -27,12 +27,20 @@ def native_start(receiver, tokens):
     return receiver(input_ids=tokens, use_cache=True, logits_to_keep=1)
 
 
-def cached_start(receiver, features, token):
+def cached_start(receiver, features, tokens):
     cache = to_cache(features, receiver)
-    position = torch.tensor([len(features)], device=token.device)
-    return receiver(input_ids=token, past_key_values=cache, use_cache=True,
-                    attention_mask=torch.ones(1, len(features) + 1, dtype=torch.long, device=token.device),
+    position = torch.arange(len(features), len(features) + tokens.shape[1], device=tokens.device)
+    return receiver(input_ids=tokens, past_key_values=cache, use_cache=True,
+                    attention_mask=torch.ones(1, len(features) + tokens.shape[1], dtype=torch.long, device=tokens.device),
                     position_ids=position[None], cache_position=position, logits_to_keep=1)
+
+
+def handoff_prefix_length(sample, target, handoff):
+    length = len(sample['tokens'][target]['ids'])
+    start = length - 1 if handoff == 'last-token' else min(sample['question_positions'][target])
+    if not 0 < start < length:
+        raise ValueError('Handoff requires a nonempty cache prefix and prompt suffix')
+    return start
 
 
 def continue_greedy(receiver, output, max_new_tokens, eos_ids):
@@ -102,6 +110,8 @@ def main():
     p.add_argument('--limit', type=int, default=40)
     p.add_argument('--tokens', type=int, default=32)
     p.add_argument('--repeats', type=int, default=5)
+    p.add_argument('--handoff', choices=('last-token', 'question'), default='last-token',
+                   help='Replay the final prompt token, or the question through Answer:, over the translated prefix')
     p.add_argument('--checkpoint-file', type=Path, help='Evaluate a saved local mapper instead of the original cloud checkpoint')
     p.add_argument('--upload-prefix', help='Unique experiments/... destination')
     args = p.parse_args()
@@ -161,10 +171,11 @@ def main():
         source = data.features(sample, run['source'])
         target = data.features(sample, run['target'])
         tokens = torch.tensor([sample['tokens'][run['target']]['ids']], device=args.device)
-        prefix_len = tokens.shape[1] - 1
+        prefix_len = handoff_prefix_length(sample, run['target'], args.handoff)
+        suffix = tokens[:, prefix_len:]
         with torch.inference_mode():
             native = native_start(receiver, tokens)
-            control = cached_start(receiver, target[:prefix_len].to(args.device), tokens[:, -1:])
+            control = cached_start(receiver, target[:prefix_len].to(args.device), suffix)
             control_error = (native.logits - control.logits).abs().max().item()
             if not torch.allclose(native.logits, control.logits, rtol=1e-3, atol=1e-3):
                 raise ValueError(f'Native cache replay failed: {sample["id"]}')
@@ -173,6 +184,7 @@ def main():
             if native_tokens != control_tokens:
                 raise ValueError(f'Native cache continuation diverged: {sample["id"]}')
             row = {'id': sample['id'], 'prompt_tokens': tokens.shape[1], 'control_max_logit_error': control_error,
+                   'replayed_prompt_tokens': suffix.shape[1],
                    'native_tokens': native_tokens, 'native_text': tokenizer.decode(native_tokens, skip_special_tokens=True),
                    'methods': {}}
             def native_fn():
@@ -181,15 +193,21 @@ def main():
             for affine, name in [(True, 'affine'), (False, 'attention')]:
                 def mapped_fn():
                     features = translate_prefix(mapper, source, sample, translation_args, prefix_len, affine)
-                    return cached_start(receiver, features, tokens[:, -1:])
+                    return cached_start(receiver, features, suffix)
                 measurements = timed(mapped_fn, args.device, args.repeats)
-                generated = continue_greedy(receiver, mapped_fn(), args.tokens, eos_ids)
+                output = mapped_fn()
+                first_kl = logit_kl(output.logits, native.logits).item()
+                native_token = native.logits[0, -1].argmax()
+                native_rank = 1 + (output.logits[0, -1] > output.logits[0, -1, native_token]).sum().item()
+                generated = continue_greedy(receiver, output, args.tokens, eos_ids)
                 row['methods'][name] = dict(prefix_agreement(native_tokens, generated), tokens=generated,
+                    first_token_kl=first_kl, native_first_token_rank=native_rank,
                     text=tokenizer.decode(generated, skip_special_tokens=True), handoff_ms=measurements)
             rows.append(row)
         print(f'Evaluated {len(rows)}/{min(args.limit, len(data.validation))}: {sample["id"]}', flush=True)
     report = {'dataset_revision': run['dataset_revision'], 'checkpoint_revision': checkpoint_revision,
               'checkpoint': checkpoint_name, 'checkpoint_sha256': checkpoint_sha, 'split': 'validation',
+              'handoff': args.handoff,
               'note': 'Development prompts used for checkpoint selection; not a held-out final test.',
               'generation': {'mode': 'greedy', 'max_new_tokens': args.tokens, 'eos_ids': sorted(eos_ids)},
               'timing': {'repeats': args.repeats, 'warmups': 1,
@@ -199,6 +217,7 @@ def main():
         'native_immediate_eos': sum(r['native_tokens'][0] in eos_ids for r in rows), 'methods': {}}
     for name in ('affine', 'attention'):
         report['summary']['methods'][name] = {'first_token_agreement': sum(r['methods'][name]['first_token_match'] for r in rows) / len(rows),
+            'mean_first_token_kl': statistics.mean(r['methods'][name]['first_token_kl'] for r in rows),
             'exact_sequence_agreement': sum(r['methods'][name]['sequence_equal'] for r in rows) / len(rows),
             'mean_matching_prefix_tokens': statistics.mean(r['methods'][name]['matching_prefix_tokens'] for r in rows),
             'median_handoff_ms': statistics.median(statistics.median(r['methods'][name]['handoff_ms']) for r in rows),

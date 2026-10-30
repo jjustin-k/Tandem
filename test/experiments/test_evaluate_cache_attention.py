@@ -10,7 +10,7 @@ import torch
 from transformers import Qwen2Config, Qwen2ForCausalLM
 import paired_kv_dataset as base
 from train_cache_attention import stack_features
-from evaluate_cache_attention import native_start, cached_start, continue_greedy, prefix_agreement, timed, lock_workdir, check_destination
+from evaluate_cache_attention import native_start, cached_start, continue_greedy, prefix_agreement, timed, lock_workdir, check_destination, handoff_prefix_length
 
 
 class EvaluationTests(unittest.TestCase):
@@ -45,11 +45,16 @@ class EvaluationTests(unittest.TestCase):
         tokens = torch.tensor([[3, 5, 7, 9, 2, 1]])
         features, shape = base.capture(model, tokens[0].tolist(), 'cpu')
         features = stack_features(features, shape)
-        with torch.inference_mode():
-            a = native_start(model, tokens)
-            b = cached_start(model, features[:-1], tokens[:, -1:])
-            torch.testing.assert_close(a.logits, b.logits, atol=1e-5, rtol=1e-4)
-            self.assertEqual(continue_greedy(model, a, 6, set()), continue_greedy(model, b, 6, set()))
+        sample = {'tokens': {'qwen': {'ids': tokens[0].tolist()}},
+                  'question_positions': {'qwen': [2, 3]}}
+        for handoff, expected in [('last-token', 5), ('question', 2)]:
+            with self.subTest(handoff=handoff), torch.inference_mode():
+                prefix = handoff_prefix_length(sample, 'qwen', handoff)
+                self.assertEqual(prefix, expected)
+                a = native_start(model, tokens)
+                b = cached_start(model, features[:prefix], tokens[:, prefix:])
+                torch.testing.assert_close(a.logits, b.logits, atol=1e-5, rtol=1e-4)
+                self.assertEqual(continue_greedy(model, a, 6, set()), continue_greedy(model, b, 6, set()))
         count = []
         self.assertEqual(len(timed(lambda: count.append(1), 'cpu', 3)), 3)
         self.assertEqual(len(count), 4)  # One warm-up plus three timed runs.

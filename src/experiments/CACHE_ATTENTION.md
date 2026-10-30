@@ -90,3 +90,29 @@ To continue, keep the work directory, feature cache and upload prefix, then add 
 `finish_continuation.sh` evaluates both selected checkpoints on the same 40 development prompts, generating up to 32 greedy tokens per prompt. It uses `evaluate_cache_attention.py --checkpoint-file` with native replay controls and records each checkpoint's SHA-256. Both reports must contain identical native continuations before comparison. One timing repeat per path is included for diagnostics; this run does not establish a speedup.
 
 After evaluation, the finish script uploads and verifies both training-output folders and both evaluation reports, using at most four folder commits. Deferred uploads keep their files on Ada. Rerunning the script reuses matching saved evaluations and retries publication without retraining or regenerating continuations. Keep the Ada cache and output directories until all four uploads are verified.
+
+## Continuation findings and next diagnostic
+
+The [verified reports](https://huggingface.co/datasets/tandemkv/paired-kv-qwen-smollm/tree/ba8bfb17f27e5e6e10571093814c75a0c1fbef5c/experiments) compare the selected checkpoints on the same 40 development prompts, with up to 32 greedy tokens:
+
+| Calibration | First token matches | Mean matching prefix | Full continuation matches |
+| --- | ---: | ---: | ---: |
+| One token | 22/40 | 0.625 tokens | 0/40 |
+| 32 tokens | 19/40 | 1.225 tokens | 0/40 |
+
+All native replay controls passed. The 32-token model often retains the topic but changes names or details: native “Pam Veasey and Jon Jost” becomes “Pam Veasey and Jon Jorsky.” Only two prompts match at least five leading tokens; none match ten. Teacher-forced agreement of 64.6% therefore does not establish independent generation retention.
+
+The eight monitored training prompts reach KL 0.613 and a 6.25-token mean matching prefix, versus KL 1.366 and 1.225 tokens on development prompts. This small training subset suggests a generalization gap; it is not a full training-set estimate. Validation KL is best at epoch 23 and then worsens through epoch 28 while training loss falls. More passes are not the priority. Alignment has exact character-end matches for 97.1% of development prompt tokens, but that does not establish accurate mapped features.
+
+Next, compare `--handoff last-token` with `--handoff question` using the **same 32-token checkpoint**. The latter translates the prefix before the first question token, then lets Qwen process the unchanged question and `Answer:` suffix: 10–45 tokens on these prompts. This tests whether recomputing the question helps Qwen use the translated context. It introduces partial receiver prefill and is not HeteroFold's prefill-free method. A gain would support testing question replay further; no gain would leave passage-cache fidelity as a concern. Neither outcome alone localizes a layer, K/V component, or architectural cause.
+
+```sh
+for handoff in last-token question; do
+  uv run --locked --script src/experiments/evaluate_cache_attention.py \
+    --checkpoint-file /path/to/full-tokens-32/outputs/best.pt \
+    --work /path/to/new-diagnostic/$handoff --data-root /path/to/existing-feature-cache \
+    --handoff "$handoff" --tokens 32 --limit 40 --repeats 1
+done
+```
+
+Run on one allocated GPU with `CUDA_VISIBLE_DEVICES` set. Each report records the checkpoint hash, handoff mode, replayed token count, first-token KL and rank of the native first token, plus the existing generation metrics. Native saved-cache logits and continuations must match full prefill at each handoff boundary. Compare identical prompt IDs and native continuations across the two reports. This diagnostic needs no training, new shards or answer labels; its GPU results are pending.

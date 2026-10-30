@@ -18,6 +18,10 @@ class FinishTests(unittest.TestCase):
             report = {'checkpoint_sha256': base.file_sha(path), 'generation': {'mode': 'greedy', 'max_new_tokens': 32},
                       'split': 'validation', 'samples': [{'id': str(i)} for i in range(40)]}
             check_report(report, path)
+            report['handoff'] = 'question'
+            with self.assertRaises(ValueError):
+                check_report(report, path)
+            report['handoff'] = 'last-token'
             path.write_bytes(b'different checkpoint')
             with self.assertRaisesRegex(ValueError, 'does not match'):
                 check_report(report, path)

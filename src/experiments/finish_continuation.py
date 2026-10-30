@@ -17,6 +17,7 @@ from calibrate_cache_attention import CheckpointPublisher
 
 def check_report(report, checkpoint):
     if (report['checkpoint_sha256'] != base.file_sha(checkpoint) or
+            report.get('handoff', 'last-token') != 'last-token' or
             report['generation']['mode'] != 'greedy' or
             report['generation']['max_new_tokens'] != 32 or
             report['split'] != 'validation' or len(report['samples']) != 40 or
