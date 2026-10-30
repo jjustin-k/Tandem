@@ -130,6 +130,16 @@ Question replay lowers first-token KL on 31/40 prompts. Matching prefixes improv
 
 Add `--kv-ablation --handoff last-token` to evaluate the selected 32-token checkpoint on the same 40 prompts with two extra conditions: native keys plus translated values, and translated keys plus native values. Replace only the chosen prefix component in pre-RoPE feature space; apply receiver RoPE once and generate normally after handoff. The existing native replay control, translated attention path and affine control run alongside them. Compare first-token KL, first-token agreement and independent continuations within the same report.
 
-If native keys improve retention, translated keys deserve further investigation; if native values help, investigate value translation. Neither intervention isolates an additive error contribution: keys and values interact through the receiver, and a hybrid cache can differ from both native and jointly translated caches. These are diagnostic substitutions requiring native receiver caches, with no deployment timing or prefill-saving claim. No retraining is involved, and GPU results are pending.
+If native keys improve retention, translated keys deserve further investigation; if native values help, investigate value translation. Neither intervention isolates an additive error contribution: keys and values interact through the receiver, and a hybrid cache can differ from both native and jointly translated caches. These are diagnostic substitutions requiring native receiver caches, with no deployment timing or prefill-saving claim. No retraining is involved.
 
 `run_kv_ablation.sh <full-git-commit>` prepares and runs this comparison on Ada GPU 0. It verifies the saved checkpoint, downloads the evaluator and dependencies including its lockfile, checks the bundle hashes, rejects an occupied GPU or duplicate job, and uploads one report. Run it under `nohup` to survive disconnects. An existing report is retained and never regenerated automatically; if upload fails, the log identifies the failure and the local report remains available for publication.
+
+The [completed Ada report](https://huggingface.co/datasets/tandemkv/paired-kv-qwen-smollm/blob/f277905af032112cc9bc315e9a7fef4eae35609a/experiments/kv-ablation-1641c9063a85/evaluation.json) uses the same selected checkpoint and 40 development prompts. Native replay controls pass, and the fully translated baseline reproduces the preceding evaluation.
+
+| Prefix cache | First-token KL | First token matches | Mean matching prefix | Full continuation matches |
+| --- | ---: | ---: | ---: | ---: |
+| Translated K and V | 2.156 | 19/40 | 1.225 tokens | 0/40 |
+| Native K, translated V | 2.003 | 18/40 | 0.825 tokens | 0/40 |
+| Translated K, native V | 1.623 | 22/40 | 2.425 tokens | 0/40 |
+
+Replacing values lowers first-token KL on 34/40 prompts, versus 22/40 for replacing keys. With native values, first-token matches gain eight prompts and lose five; matching prefixes improve on 12 and worsen on nine. The evidence favors investigating value translation next, but does not establish that keys are adequate or that a particular value-training change will help. Neither substitution restores reliable independent generation, and exact matching still penalizes some harmless rephrasing.
